@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192" role="img" aria-label="Тілашар">
+  <rect width="192" height="192" rx="42" fill="#F5EFE3"/>
+  <rect x="9" y="9" width="174" height="174" rx="34" fill="#FFFDF8" stroke="#5A3E2B" stroke-width="7"/>
+  <path d="M96 150V88" fill="none" stroke="#5A3E2B" stroke-width="7" stroke-linecap="round"/>
+  <path d="M96 88C96 62 72 46 55 53c-15 6-12 26 3 26 11 0 11-14 2-14" fill="none" stroke="#5A3E2B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M96 88c0-26 24-42 41-35 15 6 12 26-3 26-11 0-11-14-2-14" fill="none" stroke="#5A3E2B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="96" cy="150" r="13" fill="#C2456A" stroke="#5A3E2B" stroke-width="7"/>
+</svg>
