@@ -107,6 +107,7 @@ def candidate_paths() -> list[Path]:
     paths.extend(
         [
             here.parents[1] / "seed_data" / "words.js",
+            here.parents[2] / "public" / "src" / "words.js",
             here.parents[2] / "web" / "words.js",
             here.parents[3] / "tilashar" / "words.js",
         ]
@@ -126,10 +127,16 @@ def resolve_words_js(explicit: str | None = None) -> Path:
 def parse_words_js(raw: str) -> list[dict[str, Any]]:
     """Достаёт JSON-массив тем из текста words.js."""
     text = raw.strip()
-    start = text.find(PREFIX)
-    if start == -1:
-        raise ValueError(f"в файле нет присваивания {PREFIX!r}")
-    payload = text[start + len(PREFIX) :].strip().rstrip(";").strip()
+    # Файл живёт и как модуль клиента (export const TOPICS = [...]),
+    # и как старый скрипт (window.TILASHAR_TOPICS = [...]).
+    for prefix in (PREFIX, "export const TOPICS", "export const TILASHAR_TOPICS", "window.TILASHAR_TOPICS"):
+        start = text.find(prefix)
+        if start != -1:
+            break
+    else:
+        raise ValueError("в файле нет объявления со списком тем")
+    payload = text[start + len(prefix) :].strip()
+    payload = payload.lstrip("=").strip().rstrip(";").strip()
     topics = json.loads(payload)
     if not isinstance(topics, list):
         raise ValueError("ожидался массив тем")
