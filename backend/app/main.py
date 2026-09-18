@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import logging
-from contextlib import suppress
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app import __version__
@@ -64,14 +61,6 @@ def create_app() -> FastAPI:
             max_children=settings.max_children,
             version=__version__,
         )
-
-    # Статика с родительскими записями. Если каталог недоступен (например, в тестах),
-    # просто не монтируем — API от этого не ломается.
-    media_root = Path(settings.media_root)
-    with suppress(OSError):
-        media_root.mkdir(parents=True, exist_ok=True)
-    if media_root.is_dir():
-        app.mount("/media", StaticFiles(directory=str(media_root)), name="media")
 
     return app
 

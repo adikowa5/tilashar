@@ -1,6 +1,8 @@
-"""Родительские записи голоса: список, загрузка и удаление.
+"""Родительские записи голоса: список, загрузка, отдача и удаление.
 
-Файлы лежат в MEDIA_ROOT/<family_id>/<sha256>.wav и отдаются статикой по /media/...
+Содержимое хранится в БД (serverless-хостинг не даёт постоянного диска) и отдаётся
+по адресу /api/v1/voices/audio/<sha256>.wav. Этот адрес не требует токена: 256-битный
+хеш не угадать, зато <audio src> и кеш service worker работают без заголовков.
 Записи ребёнка на сервере не хранятся вообще — распознавание идёт в браузере.
 """
 
@@ -11,7 +13,6 @@ import hashlib
 import io
 import re
 import wave
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
@@ -57,12 +58,6 @@ def _to_out(record: VoiceRecord) -> VoiceOut:
     )
 
 
-def _drop_file(path: str) -> None:
-    """Удаляет файл, молча игнорируя отсутствие и проблемы доступа."""
-    with contextlib.suppress(OSError):
-        Path(path).unlink()
-
-
 @router.get("/voices", response_model=list[VoiceOut])
 def list_voices(
     db: Session = Depends(get_db),
@@ -100,12 +95,7 @@ def put_voice(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_empty")
 
     digest = hashlib.sha256(payload).hexdigest()
-    folder = Path(settings.media_root) / family.id
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{digest}.wav"
-    target.write_bytes(payload)
-
-    url = f"/media/{family.id}/{digest}.wav"
+    url = f"/api/v1/voices/audio/{digest}.wav"
     record = db.execute(
         select(VoiceRecord).where(
             VoiceRecord.family_id == family.id, VoiceRecord.key == key
@@ -115,11 +105,9 @@ def put_voice(
     if record is None:
         record = VoiceRecord(family_id=family.id, key=key)
         db.add(record)
-    elif record.sha256 != digest:
-        _drop_file(record.path)  # старое содержимое больше не нужно
 
     record.sha256 = digest
-    record.path = str(target)
+    record.data = payload
     record.url = url
     record.size_bytes = len(payload)
     record.duration_ms = _wav_duration_ms(payload)
@@ -144,7 +132,27 @@ def delete_voice(
     ).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="voice_not_found")
-    _drop_file(record.path)
     db.delete(record)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/voices/audio/{digest}.wav")
+def get_voice_audio(digest: str, db: Session = Depends(get_db)) -> Response:
+    """Отдаёт содержимое записи по хешу.
+
+    Без авторизации намеренно: адрес содержит 256-битный хеш, который не угадать,
+    а браузеру так проще — <audio src> и кеш service worker не умеют слать заголовки.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", digest or ""):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="voice_not_found")
+    record = db.execute(
+        select(VoiceRecord).where(VoiceRecord.sha256 == digest).limit(1)
+    ).scalar_one_or_none()
+    if record is None or not record.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="voice_not_found")
+    return Response(
+        content=record.data,
+        media_type="audio/wav",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )

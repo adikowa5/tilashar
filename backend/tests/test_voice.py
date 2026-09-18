@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import io
-import os
 import wave
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -41,7 +39,7 @@ def test_upload_and_list_voice(client: TestClient, headers: dict[str, str]) -> N
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["key"] == KEY
-    assert body["url"].startswith("/media/")
+    assert body["url"].startswith("/api/v1/voices/audio/")
     assert body["url"].endswith(".wav")
     assert body["duration_ms"] == 500
 
@@ -50,14 +48,19 @@ def test_upload_and_list_voice(client: TestClient, headers: dict[str, str]) -> N
     assert [item["key"] for item in listed.json()] == [KEY]
 
 
-def test_uploaded_file_lands_in_media_root(
+def test_uploaded_audio_is_served_by_hash(
     client: TestClient, headers: dict[str, str]
 ) -> None:
-    body = upload(client, headers, KEY, make_wav()).json()
-    relative = body["url"].removeprefix("/media/")
-    path = Path(os.environ["MEDIA_ROOT"]) / relative
-    assert path.is_file()
-    assert path.stat().st_size > 0
+    """Содержимое отдаётся по capability-URL — без токена, но по неугадываемому хешу."""
+    payload = make_wav()
+    body = upload(client, headers, KEY, payload).json()
+    audio = client.get(body["url"])  # заголовков намеренно нет
+    assert audio.status_code == 200
+    assert audio.headers["content-type"].startswith("audio/wav")
+    assert audio.content == payload
+
+    missing = client.get(f"{API}/voices/audio/{'0' * 64}.wav")
+    assert missing.status_code == 404
 
 
 def test_reupload_replaces_record(client: TestClient, headers: dict[str, str]) -> None:

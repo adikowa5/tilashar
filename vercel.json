@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{backend/tests/**,backend/alembic/**,docs/**,**/__pycache__/**,*.md,nginx.conf,docker-compose.yml,Makefile}"
+    }
+  },
+  "crons": [
+    {
+      "path": "/health",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

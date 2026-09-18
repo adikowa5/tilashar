@@ -9,6 +9,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    LargeBinary,
     Boolean,
     Date,
     DateTime,
@@ -228,8 +229,9 @@ class VoiceRecord(Base):
         String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True
     )
     key: Mapped[str] = mapped_column(String(80), nullable=False)
-    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    path: Mapped[str] = mapped_column(Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # Содержимое лежит в БД: serverless-окружение не имеет постоянного диска.
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

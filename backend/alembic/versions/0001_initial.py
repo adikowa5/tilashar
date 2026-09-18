@@ -176,7 +176,7 @@ def upgrade() -> None:
         sa.Column("family_id", sa.String(length=36), nullable=False),
         sa.Column("key", sa.String(length=80), nullable=False),
         sa.Column("sha256", sa.String(length=64), nullable=False),
-        sa.Column("path", sa.Text(), nullable=False),
+        sa.Column("data", sa.LargeBinary(), nullable=False),
         sa.Column("url", sa.Text(), nullable=False),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("duration_ms", sa.Integer(), nullable=False),
@@ -187,6 +187,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("family_id", "key", name="uq_voice_family_key"),
     )
     op.create_index("ix_voice_records_family_id", "voice_records", ["family_id"])
+    op.create_index("ix_voice_records_sha256", "voice_records", ["sha256"])
 
 
 def downgrade() -> None:
