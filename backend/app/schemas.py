@@ -50,7 +50,9 @@ class UserOut(BaseModel):
 
 
 class FamilyOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # protected_namespaces=(): поле model_voice из контракта начинается с model_,
+    # pydantic иначе считает это конфликтом со своими служебными именами.
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     id: str
     is_guest: bool
@@ -63,6 +65,8 @@ class UserPatch(BaseModel):
 
 
 class FamilyPatch(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     model_voice: bool | None = None
 
 
