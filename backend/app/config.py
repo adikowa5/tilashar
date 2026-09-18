@@ -4,8 +4,11 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Локальная база для разработки — используется, только если ни одна переменная окружения не задана.
+DEV_DATABASE_URL = "postgresql+psycopg://tilashar:tilashar@localhost:5432/tilashar"
 
 
 class Settings(BaseSettings):
@@ -19,7 +22,11 @@ class Settings(BaseSettings):
     )
 
     # Подключение к БД: postgresql+psycopg://... в проде, sqlite:///... в тестах.
-    database_url: str = "postgresql+psycopg://tilashar:tilashar@localhost:5432/tilashar"
+    # Пусто по умолчанию: тогда валидатор успевает поискать строку в других переменных
+    # (POSTGRES_URL и т.п.) и только потом подставить локальную базу для разработки.
+    # validate_default=True обязателен: без него pydantic не прогоняет валидатор
+    # по значению по умолчанию, и подстановка из других переменных не сработает.
+    database_url: str = Field(default="", validate_default=True)
 
     # Секрет для подписи JWT и для HMAC-хеша SMS-кодов.
     jwt_secret: str = "dev-secret-change-me"
@@ -80,6 +87,8 @@ class Settings(BaseSettings):
                 url = (os.environ.get(name) or "").strip()
                 if url:
                     break
+        if not url:
+            url = DEV_DATABASE_URL
         if url.startswith("postgres://"):
             url = "postgresql+psycopg://" + url[len("postgres://"):]
         elif url.startswith("postgresql://"):
