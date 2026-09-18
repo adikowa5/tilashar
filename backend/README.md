@@ -32,7 +32,6 @@ uvicorn app.main:app --reload
 | `REFRESH_TTL_DAYS` | `30` | Время жизни refresh-токена, дни |
 | `SMS_PROVIDER` | `console` | `console` — код в лог и в `dev_code`; `mobizon` — реальная отправка |
 | `MOBIZON_API_KEY` | пусто | Ключ Mobizon, нужен только при `SMS_PROVIDER=mobizon` |
-| `MEDIA_ROOT` | `/data/media` | Каталог родительских записей, отдаётся по `/media/...` |
 | `MAX_CHILDREN` | `4` | Лимит активных детей в семье |
 | `CORS_ORIGINS` | `*` | Список источников через запятую либо `*` |
 
@@ -91,7 +90,6 @@ docker build -t tilashar-backend .
 docker run --rm -p 8000:8000 \
   -e DATABASE_URL="postgresql+psycopg://tilashar:tilashar@host.docker.internal:5432/tilashar" \
   -e JWT_SECRET="..." \
-  -v tilashar-media:/data/media \
   tilashar-backend
 ```
 
@@ -102,7 +100,7 @@ docker run --rm -p 8000:8000 \
 
 ```
 app/
-  main.py      сборка FastAPI, CORS, /health, /api/v1/config, статика /media
+  main.py      сборка FastAPI, CORS, /health, /api/v1/config, служебные ручки
   config.py    настройки из окружения (pydantic-settings)
   db.py        движок, фабрика сессий, Base
   models.py    ORM-модели

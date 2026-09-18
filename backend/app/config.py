@@ -1,5 +1,6 @@
 """Настройки приложения, читаются из переменных окружения."""
 
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -31,9 +32,6 @@ class Settings(BaseSettings):
     mobizon_api_key: str = ""
     mobizon_base_url: str = "https://api.mobizon.kz"
 
-    # Каталог, куда складываются родительские записи голоса.
-    media_root: str = "/data/media"
-
     max_children: int = 4
 
     # Лимиты на выдачу и ввод SMS-кода.
@@ -50,6 +48,26 @@ class Settings(BaseSettings):
 
     # CORS: список через запятую либо "*".
     cors_origins: str = "*"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: str) -> str:
+        """Приводит строку подключения к виду, который понимает SQLAlchemy.
+
+        Хостинги (Vercel, Neon, Railway) выдают её как postgres:// или postgresql://
+        и кладут то в DATABASE_URL, то в POSTGRES_URL. SQLAlchemy же ждёт явный драйвер.
+        """
+        url = (value or "").strip()
+        if not url:
+            for name in ("DATABASE_URL", "POSTGRES_URL", "POSTGRES_PRISMA_URL", "DATABASE_URL_UNPOOLED"):
+                url = (os.environ.get(name) or "").strip()
+                if url:
+                    break
+        if url.startswith("postgres://"):
+            url = "postgresql+psycopg://" + url[len("postgres://"):]
+        elif url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url[len("postgresql://"):]
+        return url
 
     @field_validator("cors_origins")
     @classmethod

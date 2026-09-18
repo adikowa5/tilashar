@@ -8,17 +8,14 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from collections.abc import Iterator
 
 import pytest
 
-MEDIA_DIR = tempfile.mkdtemp(prefix="tilashar-media-")
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["JWT_SECRET"] = "test-secret-at-least-32-bytes-long!!"
 os.environ["SMS_PROVIDER"] = "console"
-os.environ["MEDIA_ROOT"] = MEDIA_DIR
 os.environ["MAX_CHILDREN"] = "4"
 os.environ["CORS_ORIGINS"] = "*"
 
