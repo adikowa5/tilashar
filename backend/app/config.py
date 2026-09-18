@@ -4,7 +4,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +48,23 @@ class Settings(BaseSettings):
 
     # CORS: список через запятую либо "*".
     cors_origins: str = "*"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_empty_env(cls, data: object) -> object:
+        """Пустую переменную окружения считаем незаданной.
+
+        Хостинги позволяют завести переменную без значения; pydantic на пустой
+        строке падает («не число», «не console»), и приложение не стартует.
+        Безопаснее взять значение по умолчанию.
+        """
+        if isinstance(data, dict):
+            return {
+                key: value
+                for key, value in data.items()
+                if not (isinstance(value, str) and not value.strip())
+            }
+        return data
 
     @field_validator("database_url", mode="before")
     @classmethod
