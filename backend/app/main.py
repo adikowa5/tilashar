@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -19,6 +20,29 @@ from app.schemas import ConfigOut, HealthOut
 logging.basicConfig(level=logging.INFO)
 
 API_PREFIX = "/api/v1"
+
+SECRET_RE = re.compile(r"://[^/\s]*:[^/@\s]*@")
+
+
+def dsn_shape() -> str:
+    """Драйвер, база и замаскированный хост — чтобы понять, какую строку подключения увидел сервер."""
+    try:
+        from sqlalchemy.engine import make_url
+
+        url = make_url(settings.database_url)
+        host = url.host or "-"
+        if len(host) > 10:
+            host = f"{host[:3]}***{host[-12:]}"
+        return f"{url.drivername} host={host} db={url.database or '-'}"
+    except Exception:  # noqa: BLE001
+        return "unparsable"
+
+
+def safe_reason(exc: BaseException) -> str:
+    """Короткое описание ошибки БД без логина и пароля — чтобы /health можно было открыть в браузере."""
+    text_ = f"{type(exc).__name__}: {exc}".replace("\n", " ")
+    text_ = SECRET_RE.sub("://***:***@", text_)
+    return text_[:300]
 
 
 def create_app() -> FastAPI:
@@ -44,13 +68,13 @@ def create_app() -> FastAPI:
     @app.get("/health", response_model=HealthOut, tags=["service"])
     def health() -> HealthOut:
         """Проверка живости процесса и доступности БД."""
-        db_status = "ok"
         try:
             with SessionLocal() as session:
                 session.execute(text("SELECT 1"))
-        except Exception:  # noqa: BLE001 — health не должен падать, только сообщать
-            db_status = "error"
-        return HealthOut(status="ok", db=db_status)
+        except Exception as exc:  # noqa: BLE001 — health не должен падать, только сообщать
+            logging.exception("health: база недоступна")
+            return HealthOut(status="ok", db="error", reason=f"{dsn_shape()} | {safe_reason(exc)}")
+        return HealthOut(status="ok", db="ok")
 
     @app.get(f"{API_PREFIX}/config", response_model=ConfigOut, tags=["service"])
     def read_config() -> ConfigOut:

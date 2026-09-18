@@ -197,6 +197,7 @@ class VoiceOut(BaseModel):
 class HealthOut(BaseModel):
     status: str
     db: str
+    reason: str | None = None
 
 
 class ConfigOut(BaseModel):
