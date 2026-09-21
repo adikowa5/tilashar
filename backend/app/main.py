@@ -38,6 +38,19 @@ def dsn_shape() -> str:
         return "unparsable"
 
 
+DB_ENV_NAMES = ("DATABASE_URL", "POSTGRES_URL", "POSTGRES_PRISMA_URL", "DATABASE_URL_UNPOOLED")
+
+
+def env_shape() -> str:
+    """Какие переменные БД видит сервер (только имена, без значений), окружение и коммит."""
+    import os
+
+    seen = [name for name in DB_ENV_NAMES if (os.environ.get(name) or "").strip()]
+    env = os.environ.get("VERCEL_ENV", "-")
+    sha = (os.environ.get("VERCEL_GIT_COMMIT_SHA") or "-")[:7]
+    return f"env={env} commit={sha} db_vars={','.join(seen) or 'none'}"
+
+
 def safe_reason(exc: BaseException) -> str:
     """Короткое описание ошибки БД без логина и пароля — чтобы /health можно было открыть в браузере."""
     text_ = f"{type(exc).__name__}: {exc}".replace("\n", " ")
@@ -73,7 +86,7 @@ def create_app() -> FastAPI:
                 session.execute(text("SELECT 1"))
         except Exception as exc:  # noqa: BLE001 — health не должен падать, только сообщать
             logging.exception("health: база недоступна")
-            return HealthOut(status="ok", db="error", reason=f"{dsn_shape()} | {safe_reason(exc)}")
+            return HealthOut(status="ok", db="error", reason=f"{env_shape()} | {dsn_shape()} | {safe_reason(exc)}")
         return HealthOut(status="ok", db="ok")
 
     @app.get(f"{API_PREFIX}/config", response_model=ConfigOut, tags=["service"])
