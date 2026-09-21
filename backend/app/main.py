@@ -48,7 +48,16 @@ def env_shape() -> str:
     seen = [name for name in DB_ENV_NAMES if (os.environ.get(name) or "").strip()]
     env = os.environ.get("VERCEL_ENV", "-")
     sha = (os.environ.get("VERCEL_GIT_COMMIT_SHA") or "-")[:7]
-    return f"env={env} commit={sha} db_vars={','.join(seen) or 'none'}"
+    # Похожие имена (с опечаткой, пробелом, другим регистром или пустым значением) — тоже только имена.
+    similar = sorted(
+        f"{name!r}{'' if (value or '').strip() else ':empty'}"
+        for name, value in os.environ.items()
+        if re.search(r"DATABASE|POSTGRES|NEON|^PG", name, re.IGNORECASE) and name not in seen
+    )
+    return (
+        f"env={env} commit={sha} db_vars={','.join(seen) or 'none'}"
+        f" similar={','.join(similar) or 'none'}"
+    )
 
 
 def safe_reason(exc: BaseException) -> str:
