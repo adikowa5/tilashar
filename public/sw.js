@@ -1,9 +1,11 @@
 /* Тілашар — service worker.
    Оболочка и контент (включая пак озвучки) кладутся в кеш при установке:
    в офлайне приложение открывается и даёт пройти урок.
-   Статика — cache-first, /api — network-first с коротким кешем на GET. */
+   Код и стили — network-first с таймаутом: новый деплой виден со следующей загрузки,
+   а без сети всё берётся из кеша. /api — network-first с кешем на GET. */
 
-const VERSION = "tilashar-v1";
+const VERSION = "tilashar-v2";
+const NET_TIMEOUT_MS = 3500;
 const SHELL = VERSION + "-shell";
 const RUNTIME = VERSION + "-runtime";
 
@@ -33,7 +35,8 @@ const PRECACHE = [
   "./src/views/lesson.js",
   "./src/views/results.js",
   "./src/views/studio.js",
-  "./src/views/parent.js"
+  "./src/views/parent.js",
+  "./src/views/mic.js"
 ];
 
 self.addEventListener("install", e => {
@@ -75,7 +78,26 @@ async function networkFirst(req){
   }
 }
 
-/* cache-first: статика и озвучка */
+/* network-first для своей статики: ждём сеть не дольше NET_TIMEOUT_MS, иначе отдаём кеш */
+async function freshFirst(req){
+  const cache = await caches.open(SHELL);
+  const network = fetch(req).then(res => {
+    if (res && res.ok) cache.put(req, res.clone());
+    return res;
+  });
+  network.catch(() => {});             // ответ из кеша уже ушёл — поздняя ошибка сети не важна
+  const hit = await cache.match(req);
+  if (!hit) return network;
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), NET_TIMEOUT_MS));
+  try {
+    const res = await Promise.race([network, timeout]);
+    return res && res.ok ? res : hit;
+  } catch {
+    return hit;
+  }
+}
+
+/* cache-first: шрифты и медиа */
 async function cacheFirst(req, cacheName){
   const cache = await caches.open(cacheName);
   const hit = await cache.match(req, { ignoreSearch: false });
@@ -110,7 +132,7 @@ self.addEventListener("fetch", e => {
 
   if (req.method !== "GET") return;
   if (isFont(url) || isMedia(url)) return e.respondWith(cacheFirst(req, RUNTIME));
-  if (url.origin === self.location.origin) return e.respondWith(cacheFirst(req, SHELL));
+  if (url.origin === self.location.origin) return e.respondWith(freshFirst(req));
 });
 
 self.addEventListener("message", e => { if (e.data === "skip-waiting") self.skipWaiting(); });

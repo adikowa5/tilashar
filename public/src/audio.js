@@ -80,35 +80,49 @@ function pickVoice(){
 }
 try { speechSynthesis.getVoices(); } catch {}
 
+/* Проигрывает источник {id, b64|url}. null — источника нет или его не удалось декодировать. */
+async function playSource(src, token, onProgress){
+  const ctx = src ? audioCtx() : null;
+  if (!src || !ctx) return null;
+  let item = null;
+  try { item = await getBuffer(src); } catch {}
+  if (playToken !== token) return false;
+  if (!item) return null;
+  return new Promise(resolve => {
+    const node = ctx.createBufferSource();
+    node.buffer = item.buf; node.connect(ctx.destination);
+    const t0 = ctx.currentTime + 0.05;
+    node.start(t0);
+    playing = { node, resolve };
+    const tick = () => {
+      if (!playing || playing.node !== node) return;
+      const t = ctx.currentTime - t0;
+      if (onProgress && t >= item.s) onProgress(Math.min(0.999, (t - item.s) / Math.max(0.08, item.e - item.s)));
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    node.onended = () => {
+      if (playing && playing.node === node) playing = null;
+      cancelAnimationFrame(rafId); onProgress && onProgress(1); resolve(true);
+    };
+  });
+}
+
+/* Запись ребёнка (WAV в base64): «послушай, как ты сказал». */
+export async function playWav(b64, id){
+  stopAudio();
+  const token = {}; playToken = token;
+  const done = await playSource({ id: id || "take@" + Date.now(), b64 }, token);
+  return done === true;
+}
+
 export async function play(key, { onProgress } = {}){
   stopAudio();
   const token = {}; playToken = token;
-  const src = sourceFor(key), ctx = src ? audioCtx() : null;
-  if (src && ctx){
-    let item = null;
-    try { item = await getBuffer(src); } catch {}
-    if (playToken !== token) return false;
-    if (item){
-      return new Promise(resolve => {
-        const node = ctx.createBufferSource();
-        node.buffer = item.buf; node.connect(ctx.destination);
-        const t0 = ctx.currentTime + 0.05;
-        node.start(t0);
-        playing = { node, resolve };
-        const tick = () => {
-          if (!playing || playing.node !== node) return;
-          const t = ctx.currentTime - t0;
-          if (onProgress && t >= item.s) onProgress(Math.min(0.999, (t - item.s) / Math.max(0.08, item.e - item.s)));
-          rafId = requestAnimationFrame(tick);
-        };
-        rafId = requestAnimationFrame(tick);
-        node.onended = () => {
-          if (playing && playing.node === node) playing = null;
-          cancelAnimationFrame(rafId); onProgress && onProgress(1); resolve(true);
-        };
-      });
-    }
-  }
+  const src = sourceFor(key);
+  const done = await playSource(src, token, onProgress);
+  if (done !== null) return done;
+  if (playToken !== token) return false;
   if (key.startsWith("w:") && modelVoiceOn() && !VOICES.has(key) && "speechSynthesis" in window){
     return new Promise(resolve => {
       const u = new SpeechSynthesisUtterance(key.slice(2));

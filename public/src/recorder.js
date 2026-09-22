@@ -51,13 +51,52 @@ export const Rec = {
     this.chunks = []; this.capLen = 0;
     return { data: out, sampleRate: this.sampleRate };
   },
+  onClosed: null,
   close(){
+    const closed = this.onClosed; this.onClosed = null;
     this.capturing = false; this.onAuto = null; this.onLevel = null;
     try { this.node && (this.node.onaudioprocess = null); this.src && this.src.disconnect(); this.node && this.node.disconnect(); this.sink && this.sink.disconnect(); } catch {}
     if (this.stream) this.stream.getTracks().forEach(t => t.stop());
     this.stream = this.src = this.node = this.sink = null; this.ring = []; this.ringLen = 0;
+    closed && closed();
   }
 };
+
+/* ---------- одна запись ребёнка ----------
+   Включаем микрофон, ждём слово, останавливаемся сами по тишине (или по stopOnce).
+   Микрофон сразу закрываем: на iPhone, пока он открыт, всё звучит тихо, из разговорного динамика. */
+function setAudioSession(type){
+  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch {}
+}
+let stopCurrent = null;
+export function stopOnce(){ stopCurrent && stopCurrent(); }
+
+export async function recordOnce({ onLevel, onStart } = {}){
+  setAudioSession("play-and-record");
+  try { await Rec.start(); }
+  catch (e){ setAudioSession("auto"); throw e; }
+  let raw;
+  try {
+    raw = await new Promise(resolve => {
+      let done = false;
+      const end = () => {
+        if (done) return;
+        done = true; stopCurrent = null; Rec.onAuto = null;
+        resolve(Rec.finish());
+      };
+      stopCurrent = end;
+      Rec.onAuto = end;
+      Rec.onClosed = end;               // ушли со страницы посреди записи — просто завершаемся
+      Rec.onLevel = onLevel || null;
+      Rec.take();
+      onStart && onStart();
+    });
+  } finally {
+    Rec.close();
+    setAudioSession("auto");
+  }
+  return processTake(raw.data, raw.sampleRate);
+}
 
 // Щедро режем тишину (180 мс до первого звука, 280 мс после последнего), нормализуем, 22,05 кГц моно WAV.
 export async function processTake(data, sr){

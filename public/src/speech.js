@@ -3,6 +3,27 @@
 
 export const SR = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
 export let activeRec = null;
+
+/* Где мы запущены и что здесь реально работает с микрофоном.
+   - iPhone/iPad: все браузеры там на движке Safari, а распознавание речи Apple
+     не знает казахского. Поэтому на iOS не распознаём, а записываем ребёнка
+     и даём ему послушать себя.
+   - Встроенные браузеры Telegram/Instagram/WhatsApp/Facebook часто не дают
+     микрофон вовсе — просим открыть страницу в обычном браузере. */
+export function micEnv(){
+  const nav = typeof navigator !== "undefined" ? navigator : {};
+  const ua = nav.userAgent || "";
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (nav.maxTouchPoints || 0) > 1);
+  const android = /Android/i.test(ua);
+  const inapp = /Instagram|FBAN|FBAV|FB_IAB|Telegram|WhatsApp|MicroMessenger|Line\/|; wv\)/i.test(ua);
+  const secure = typeof window !== "undefined" && window.isSecureContext !== false;
+  const canRecord = secure && !!(nav.mediaDevices && nav.mediaDevices.getUserMedia);
+  // Safari на Mac тоже распознаёт речь силами Apple — казахского там нет.
+  const appleSpeech = ios || (/Safari\//.test(ua) && !/Chrome|Chromium|Edg\/|OPR\/|Firefox/.test(ua));
+  const canRecognize = !!SR && !appleSpeech;
+  return { ios, android, inapp, secure, canRecord, canRecognize,
+           platform: ios ? "ios" : android ? "android" : "desktop" };
+}
 export function abortListening(){ if (activeRec) { try { activeRec.abort(); } catch {} } }
 
 export function listen(onInterim){

@@ -312,3 +312,16 @@ h3{margin:0}
 .day .pb-count{font-size:16px}
 .btn.big{min-height:72px;font-size:23px;padding:0 34px;margin-bottom:16px}
 @media (max-width:560px){.btn.big{width:100%;font-size:21px}}
+
+/* ——— микрофон: громкость на кнопке, помощь родителю ——— */
+.mic.live{box-shadow:0 0 0 calc(var(--lvl, 0) * 22px) color-mix(in srgb, var(--berry) 30%, transparent);transition:box-shadow .06s linear, transform .1s}
+.linkish{all:unset;cursor:pointer;font:inherit;color:inherit;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:2px}
+.linkish:focus-visible{outline:3px solid var(--focus);outline-offset:3px;border-radius:4px}
+.mic-help{display:grid;gap:20px}
+.mh-sub{margin:0;font-family:var(--display);font-weight:700;font-size:20px}
+.mh-steps{padding:22px 26px;display:grid;gap:16px}
+.mh-steps ol{margin:0;padding-left:1.4em;display:grid;gap:12px;font-weight:700;line-height:1.5}
+.mh-steps li::marker{font-weight:900;color:var(--berry)}
+.mh-steps b{color:var(--ink);font-weight:900}
+.mic-help .tip{max-width:none}
+@media (max-width:720px){ .mic-help .studio-head{grid-template-columns:1fr;padding:20px} .mh-steps{padding:18px 18px} }

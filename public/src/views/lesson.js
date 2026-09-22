@@ -2,16 +2,24 @@
    Новое: результат каждой попытки уходит в API (POST /children/{id}/attempts),
    а в офлайне — в очередь досылки. */
 
-import { navigate, viewEl, currentGen, bump } from "../main.js";
+import { navigate, viewEl, currentGen, bump, openMicHelp } from "../main.js";
 import { state, activeChild, recordStars, syncToday } from "../state.js";
 import { api, hasSession } from "../api.js";
 import { t } from "../i18n.js";
 import { ICON, $, esc, sleep, picHTML, tintOf, wordHTML, sylls, starsRow, confetti } from "../ui.js";
-import { play, stopAudio } from "../audio.js";
-import { SR, listen, score, tipFor, activeRec, abortListening } from "../speech.js";
+import { play, playWav, stopAudio } from "../audio.js";
+import { recordOnce, stopOnce } from "../recorder.js";
+import { SR, listen, score, tipFor, activeRec, abortListening, micEnv } from "../speech.js";
 
 export let L = null;
-let micMode = SR ? "auto" : "manual";
+/* Как проходит шаг «Айт»:
+   asr     — браузер распознаёт казахский и ставит звёзды (Chrome на Android и компьютере);
+   self    — распознавания нет (iPhone, Safari, Firefox): ребёнок пишет себя и слушает;
+   blocked — микрофон запрещён или не найден: показываем, как включить;
+   manual  — микрофона нет совсем: родитель слушает и жмёт «Айттым!». */
+const ENV = micEnv();
+const initialMode = () => ENV.canRecognize ? "asr" : ENV.canRecord ? "self" : "manual";
+let micMode = initialMode();
 let listening = false;
 let pending = [];              // попытки, ещё не ушедшие на сервер
 
@@ -26,13 +34,14 @@ export function render(params){
       dayMode: !!params.dayMode
     };
     pending = [];
+    if (micMode !== "manual") micMode = initialMode();
   }
   if (!L) return navigate("today");
   paint();
 }
 
 function paint(){
-  bump(); stopAudio(); abortListening(); listening = false;
+  bump(); stopAudio(); abortListening(); stopOnce(); listening = false;
   const view = viewEl();
   const { topic, words, i, step } = L, w = words[i];
   const labels = [t("step_listen"), t("step_repeat"), t("step_say")];
@@ -178,6 +187,8 @@ const nextBtn = () => ["primary", (isLast() ? t("l_results") : t("l_next_word"))
 
 function stepSay(w){
   if (micMode === "manual") return manualSay(w, null);
+  if (micMode === "blocked") return blockedSay(w, L.micError);
+  if (micMode === "self") return stepSelf(w);
   const zone = $("#zone");
   say(t("l_mic_say"));
   zone.innerHTML = `<div class="mic-zone">
@@ -186,6 +197,7 @@ function stepSay(w){
       ${starsRow(0)}
     </div>`;
   actions([["", ICON.speaker + t("l_play_model"), () => speakWord(w)]]);
+  if (ENV.inapp) tip(t("l_inapp"));
   $("#mic").onclick = () => onMic(w);
   if (!L.introPlayed){ L.introPlayed = true; play("p:mic_intro"); }
 }
@@ -203,8 +215,17 @@ async function onMic(w){
   if (g !== currentGen()) return;
   mic.classList.remove("live"); label.textContent = t("l_press_again");
 
-  const hardErrors = ["not-allowed", "service-not-allowed", "unsupported", "language-not-supported", "network", "audio-capture", "start"];
-  if (r.error && hardErrors.includes(r.error)){ micMode = "manual"; return manualSay(w, r.error); }
+  // Нет доступа к микрофону — объясняем, как включить. Не работает само распознавание —
+  // переходим на «запиши и послушай себя», урок не останавливается.
+  if (r.error === "not-allowed" || r.error === "audio-capture"){
+    micMode = "blocked"; L.micError = r.error === "audio-capture" ? "NotFoundError" : "NotAllowedError";
+    return blockedSay(w, L.micError);
+  }
+  const speechErrors = ["service-not-allowed", "unsupported", "language-not-supported", "network", "start"];
+  if (r.error && speechErrors.includes(r.error)){
+    micMode = ENV.canRecord ? "self" : "manual";
+    return micMode === "self" ? stepSelf(w) : manualSay(w, r.error);
+  }
 
   const alts = (r.alts || []).filter(a => a && a.trim());
   if (!alts.length){
@@ -231,6 +252,81 @@ function markThreeStars(){
   if (state.guest || !hasSession()) L.gotThree = true;
 }
 
+/* ---------- «запиши и послушай себя» ---------- */
+function stepSelf(w){
+  const zone = $("#zone");
+  say(t("l_self_say"));
+  zone.innerHTML = `<div class="mic-zone">
+      <button class="mic" id="mic" type="button" aria-label="${t("l_mic_aria")}">${ICON.mic}</button>
+      <p class="mic-label" id="micLabel">${t("l_mic_label")}</p>
+    </div>`;
+  heard(!L.selfNoted ? t(ENV.ios ? "l_self_note_ios" : "l_self_note") : "");
+  L.selfNoted = true;
+  if (ENV.inapp) tip(t("l_inapp"));
+  actions([["", ICON.speaker + t("l_play_model"), () => speakWord(w)]]);
+  $("#mic").onclick = () => onSelfMic(w);
+  if (!L.introPlayed){ L.introPlayed = true; play("p:mic_intro"); }
+}
+
+async function onSelfMic(w){
+  const g = currentGen();
+  const mic = $("#mic"), label = $("#micLabel");
+  if (listening){ stopOnce(); return; }
+  stopAudio();
+  listening = true;
+  mic.classList.add("live"); label.textContent = t("l_listening");
+  say(t("l_say_now")); heard(""); tip("");
+  let rec;
+  try {
+    rec = await recordOnce({ onLevel: rms => mic.style.setProperty("--lvl", Math.min(1, Math.sqrt(rms) * 2.6).toFixed(2)) });
+  } catch (e){
+    listening = false;
+    if (g !== currentGen()) return;
+    mic.classList.remove("live"); mic.style.removeProperty("--lvl"); label.textContent = t("l_mic_label");
+    if (e && e.code === "quiet"){ say(t("l_not_heard")); play("p:silent"); return; }
+    if (e && e.name === "NotSupportedError"){ micMode = "manual"; return manualSay(w, "unsupported"); }
+    micMode = "blocked"; L.micError = e && e.name;
+    return blockedSay(w, L.micError);
+  }
+  listening = false;
+  if (g !== currentGen()) return;
+  mic.classList.remove("live"); mic.style.removeProperty("--lvl"); label.textContent = t("l_press_again");
+
+  const takeId = "take@" + L.i + "@" + Date.now();
+  const again = () => playWav(rec.wav, takeId);
+  say(t("l_self_listen"));
+  await again(); if (g !== currentGen()) return;
+  await sleep(450); if (g !== currentGen()) return;
+  say(t("l_self_compare"));
+  await speakWord(w); if (g !== currentGen()) return;
+  say(t("l_self_ask"));
+  actions([
+    ["", ICON.play + t("l_play_me"), again],
+    ["", ICON.speaker + t("l_play_model"), () => speakWord(w)],
+    ["primary", ICON.check + t("l_said_it"), () => {
+      recordResult("said", null, "manual");
+      say(t("l_good")); play("p:good");
+      confetti($("#mic"));
+      actions([["", ICON.play + t("l_play_me"), again], nextBtn()]);
+    }]
+  ]);
+}
+
+/* ---------- микрофон запрещён или не найден ---------- */
+function blockedSay(w, errName){
+  const zone = $("#zone");
+  zone.innerHTML = "";
+  say(t("l_manual_say"));
+  const missing = errName === "NotFoundError" || errName === "NotReadableError" || errName === "OverconstrainedError";
+  heard(t(missing ? "l_mic_missing" : "l_mic_blocked"));
+  tip(ENV.inapp ? t("l_inapp") : "");
+  actions([
+    ["primary", ICON.mic + t("l_mic_help"), () => openMicHelp()],
+    ["", ICON.repeat + t("l_try_again"), () => { micMode = initialMode(); L.micError = null; repaint(); }],
+    ["", t("l_without_mic"), () => { micMode = "manual"; manualSay(w, "declined"); }]
+  ]);
+}
+
 function manualSay(w, err){
   const zone = $("#zone");
   zone.innerHTML = "";
@@ -242,7 +338,8 @@ function manualSay(w, err){
       recordResult("said", null, "manual");
       say(t("l_good")); play("p:good");
       actions([["", ICON.speaker + t("l_play_model"), () => speakWord(w)], nextBtn()]);
-    }]
+    }],
+    ["", ICON.mic + t("l_mic_help"), () => openMicHelp()]
   ]);
 }
 

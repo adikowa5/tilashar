@@ -1,7 +1,7 @@
 /* Родительская зона: список детей, язык интерфейса ребёнка и родителя,
    переключатель модельного голоса. Вход — через «взрослую дверь»: задача на умножение. */
 
-import { navigate, viewEl } from "../main.js";
+import { navigate, viewEl, openMicHelp } from "../main.js";
 import { state, setSetting, setActiveChild, signOut, syncMe } from "../state.js";
 import { hasSession, isOnline } from "../api.js";
 import { t, setLocale } from "../i18n.js";
@@ -79,6 +79,7 @@ function renderZone(){
       <div class="studio-ctrl">
         <label class="switch" for="mv"><input type="checkbox" id="mv" ${modelVoiceOn() ? "checked" : ""}><span>${t("pz_model_voice")}</span></label>
         <button class="btn red" id="toStudio" type="button">${ICON.mic}${t("pz_voice_studio")}</button>
+        <button class="btn ghost" id="toMicHelp" type="button">${t("pz_mic_help")}</button>
         ${hasSession() ? `<button class="btn ghost" id="logout" type="button">${t("pz_logout")}</button>` : ""}
         <p class="status" id="st"></p>
       </div>
@@ -112,6 +113,7 @@ function renderZone(){
 
   $("#back").onclick = () => navigate("today");
   $("#toStudio").onclick = () => navigate("studio");
+  $("#toMicHelp").onclick = () => openMicHelp();
   $("#addKid").onclick = () => navigate("children", { add: true });
   view.querySelectorAll(".kid[data-id]").forEach(b => b.onclick = () => { setActiveChild(b.dataset.id); renderZone(); });
   $("#mv").onchange = async e => { await setModelVoice(e.target.checked); };

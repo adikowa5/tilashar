@@ -15,8 +15,9 @@ import * as lesson from "./views/lesson.js";
 import * as results from "./views/results.js";
 import * as studio from "./views/studio.js";
 import * as parent from "./views/parent.js";
+import * as mic from "./views/mic.js";
 
-const VIEWS = { onboarding, children, today, lesson, results, studio, parent };
+const VIEWS = { onboarding, children, today, lesson, results, studio, parent, mic };
 
 let gen = 0;
 let current = { name: null, params: {} };
@@ -42,6 +43,13 @@ export function navigate(name, params = {}, opts = {}){
   if (opts.scroll !== false) scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
+/* Помощь с микрофоном. Из урока возвращаемся без параметров — урок продолжится с того же слова. */
+export function openMicHelp(){
+  if (current.name === "mic") return;
+  const from = current.name || "today";
+  navigate("mic", { from, fromParams: from === "lesson" ? {} : current.params });
+}
+
 /* Куда идти после входа: один ребёнок — сразу в день, иначе — выбор ребёнка. */
 export function goAfterAuth(){
   if (!hasSession()) return navigate("onboarding");
@@ -53,7 +61,10 @@ export function goAfterAuth(){
 /* ---------- подвал и метатексты ---------- */
 function paintChrome(){
   const f = document.getElementById("foot");
-  if (f) f.innerHTML = `<span>${t("foot_model")}</span><span>${t("foot_mic")}</span>`;
+  if (f){
+    f.innerHTML = `<span>${t("foot_model")}</span><button class="linkish" id="footMic" type="button">${t("foot_mic")}</button>`;
+    f.querySelector("#footMic").onclick = openMicHelp;
+  }
   document.title = t("app_title");
   const d = document.querySelector('meta[name="description"]');
   if (d) d.setAttribute("content", t("app_desc"));
@@ -64,6 +75,15 @@ function paintChrome(){
 function registerSW(){
   if (!("serviceWorker" in navigator)) return;
   addEventListener("load", () => { navigator.serviceWorker.register("./sw.js").catch(() => {}); });
+  // Пришла новая версия приложения: тихо перезагружаемся, но не посреди урока или записи.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloaded) return;
+    if (current.name === "lesson" || current.name === "studio" || current.name === "mic") return;
+    reloaded = true;
+    location.reload();
+  });
 }
 
 /* ---------- старт ---------- */
