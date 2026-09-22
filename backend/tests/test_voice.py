@@ -7,9 +7,9 @@ import wave
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import API, auth_header, login_by_phone
+from tests.conftest import API, auth_header, login_as_guest
 
-KEY = "w:алма"
+KEY = "p:great"
 
 
 def make_wav(duration_ms: int = 500, sample_rate: int = 8000) -> bytes:
@@ -92,13 +92,19 @@ def test_bad_key_is_rejected(client: TestClient, headers: dict[str, str]) -> Non
     assert response.status_code == 400
     assert response.json()["detail"] == "voice_key_invalid"
 
-    assert upload(client, headers, "w:", make_wav()).status_code == 400
+    assert upload(client, headers, "p:", make_wav()).status_code == 400
 
 
-def test_phrase_key_is_allowed(client: TestClient, headers: dict[str, str]) -> None:
-    response = upload(client, headers, "p:сәлеметсіз бе", make_wav())
-    assert response.status_code == 200
-    assert response.json()["key"] == "p:сәлеметсіз бе"
+def test_word_keys_are_rejected(client: TestClient, headers: dict[str, str]) -> None:
+    """Слова уроков озвучивает автор — семья записывает только похвалу."""
+    response = upload(client, headers, "w:алма", make_wav())
+    assert response.status_code == 400
+    assert response.json()["detail"] == "voice_key_invalid"
+
+
+def test_not_wav_is_rejected(client: TestClient, headers: dict[str, str]) -> None:
+    response = upload(client, headers, KEY, b"not a wav at all")
+    assert response.status_code == 415
 
 
 def test_too_large_file_is_rejected(client: TestClient, headers: dict[str, str]) -> None:
@@ -116,7 +122,7 @@ def test_wrong_content_type_is_rejected(client: TestClient, headers: dict[str, s
 
 def test_voices_are_scoped_to_family(client: TestClient, headers: dict[str, str]) -> None:
     upload(client, headers, KEY, make_wav())
-    stranger = auth_header(login_by_phone(client, "+77019998877"))
+    stranger = auth_header(login_as_guest(client))
     assert client.get(f"{API}/voices", headers=stranger).json() == []
     assert client.delete(f"{API}/voices/{KEY}", headers=stranger).status_code == 404
 

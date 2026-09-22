@@ -2,13 +2,13 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "asgi.py": {
-      "excludeFiles": "{backend/tests/**,backend/alembic/**,docs/**,**/__pycache__/**,*.md,nginx.conf,docker-compose.yml,Makefile}"
+      "excludeFiles": "{backend/tests/**,backend/alembic/**,backend/seed_data/**,docs/**,**/__pycache__/**,*.md,nginx.conf,docker-compose.yml,Makefile}"
     }
   },
   "crons": [
     {
-      "path": "/health",
-      "schedule": "0 6 * * *"
+      "path": "/api/v1/internal/cleanup",
+      "schedule": "0 21 * * *"
     }
   ]
 }

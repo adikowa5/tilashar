@@ -1,15 +1,17 @@
-"""Сидинг встроенного контента из words.js фронтенда.
+"""Первичное наполнение базы: стартовые категории, фразы похвалы и голос модели.
 
-Файл words.js имеет вид ``window.TILASHAR_TOPICS=[...];`` — обрезаем префикс и
-точку с запятой и разбираем остаток как JSON. Русские переводы и русские
-названия тем лежат здесь же, явными словарями.
+Дальше материал ведёт автор в редакторе (#author), поэтому сидинг ничего не
+перезаписывает и не удаляет: он только добавляет то, чего в базе ещё нет.
+- категории и слова из words.js — только для категорий, которых ещё нет;
+- фразы похвалы — если фразы с таким ключом нет;
+- голос модели из seed_data/audio-pack.js — словам и фразам, у которых его ещё нет.
 
-Запуск: ``python -m app.seed [путь/к/words.js]``
-Операция идемпотентна: повторный запуск обновляет существующие темы и слова.
+Запуск: ``python -m app.seed [путь/к/words.js]``. Повторный запуск безопасен.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -20,7 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.models import Topic, Word
+from app.media import store
+from app.models import Phrase, Topic, Word
 
 PREFIX = "window.TILASHAR_TOPICS="
 
@@ -143,73 +146,113 @@ def parse_words_js(raw: str) -> list[dict[str, Any]]:
     return topics
 
 
+PHRASES: list[tuple[str, str, str]] = [
+    ("p:your_turn", "Енді сен айт!", "Теперь скажи ты!"),
+    ("p:great", "Керемет!", "Отлично!"),
+    ("p:good", "Жарайсың!", "Молодец!"),
+    ("p:almost", "Жақсы! Тағы байқап көр.", "Хорошо! Попробуй ещё."),
+    ("p:again", "Тағы бір рет айтшы.", "Скажи ещё разок."),
+    ("p:silent", "Естімедім. Қаттырақ айтшы.", "Не расслышал. Скажи погромче."),
+    ("p:mic_intro", "Микрофонды басып, сөзді айт.", "Нажми микрофон и скажи слово."),
+    ("p:done", "Сабақ бітті! Жарайсың!", "Урок окончен! Молодец!"),
+]
+
+
 def seed_topics(db: Session, topics: list[dict[str, Any]]) -> tuple[int, int]:
-    """Создаёт или обновляет встроенные темы и их слова. Возвращает (тем, слов)."""
-    word_total = 0
+    """Добавляет категории, которых ещё нет. Возвращает (новых категорий, новых слов)."""
+    new_topics = new_words = 0
     for raw_topic in topics:
         slug = str(raw_topic["id"])
+        exists = db.execute(
+            select(Topic.id).where(Topic.slug == slug, Topic.family_id.is_(None))
+        ).first()
+        if exists is not None:
+            continue                      # категорию уже ведёт автор — не трогаем
         title_kk = str(raw_topic.get("title") or slug)
-        order_index = TOPIC_ORDER.index(slug) if slug in TOPIC_ORDER else len(TOPIC_ORDER)
-
-        topic = db.execute(
-            select(Topic).where(Topic.slug == slug, Topic.family_id.is_(None))
-        ).scalar_one_or_none()
-        if topic is None:
-            topic = Topic(slug=slug, kind="builtin", family_id=None)
-            db.add(topic)
-        topic.title_kk = title_kk
-        topic.title_ru = TOPIC_TITLES_RU.get(slug, title_kk)
-        topic.pic = str(raw_topic.get("pic") or "")
-        topic.kind = "builtin"
-        topic.order_index = order_index
+        topic = Topic(
+            slug=slug, kind="builtin", family_id=None, is_published=True,
+            title_kk=title_kk, title_ru=TOPIC_TITLES_RU.get(slug, title_kk),
+            pic=str(raw_topic.get("pic") or ""),
+            order_index=TOPIC_ORDER.index(slug) if slug in TOPIC_ORDER else len(TOPIC_ORDER),
+        )
+        db.add(topic)
         db.flush()
-
-        existing = {word.text_kk: word for word in topic.words}
-        seen: set[str] = set()
+        new_topics += 1
         for index, entry in enumerate(raw_topic.get("words") or []):
-            # Каждое слово во фронтенде — массив [текст, картинка/цвет/цифра, слоги].
+            # Слово во фронтенде — массив [текст, картинка/цвет/цифра, слоги].
             text_kk = str(entry[0])
-            pic = str(entry[1]) if len(entry) > 1 else ""
-            syllables = str(entry[2]) if len(entry) > 2 else text_kk
-            seen.add(text_kk)
-
-            word = existing.get(text_kk)
-            if word is None:
-                word = Word(topic_id=topic.id, text_kk=text_kk)
-                db.add(word)
-            word.text_ru = WORDS_RU.get(text_kk, "")
-            word.syllables = syllables
-            word.pic = pic
-            word.audio_key = f"w:{text_kk}"
-            word.order_index = index
-            word_total += 1
-
-        # Слова, пропавшие из words.js, удаляем — иначе они всплывут в уроке дня.
-        for text_kk, word in existing.items():
-            if text_kk not in seen:
-                db.delete(word)
-        db.flush()
-
+            db.add(Word(
+                topic_id=topic.id, text_kk=text_kk, text_ru=WORDS_RU.get(text_kk, ""),
+                syllables=str(entry[2]) if len(entry) > 2 else text_kk,
+                pic=str(entry[1]) if len(entry) > 1 else "",
+                audio_key=f"w:{text_kk}", order_index=index,
+            ))
+            new_words += 1
     db.commit()
-    return len(topics), word_total
+    return new_topics, new_words
+
+
+def seed_phrases(db: Session) -> int:
+    added = 0
+    for index, (key, kk, ru) in enumerate(PHRASES):
+        if db.get(Phrase, key) is None:
+            db.add(Phrase(key=key, text_kk=kk, text_ru=ru, order_index=index))
+            added += 1
+    db.commit()
+    return added
+
+
+def audio_pack_path() -> Path | None:
+    here = Path(__file__).resolve()
+    for path in (here.parents[1] / "seed_data" / "audio-pack.js",
+                 here.parents[2] / "public" / "src" / "audio-pack.js"):
+        if path.is_file():
+            return path
+    return None
+
+
+def parse_audio_pack(raw: str) -> dict[str, bytes]:
+    """{"w:алма": mp3-байты, …} из ``export const AUDIO={...}``."""
+    text = raw.strip()
+    start = text.index("{")
+    data = json.loads(text[start:].rstrip(";").strip())
+    out: dict[str, bytes] = {}
+    for key, uri in data.items():
+        if isinstance(uri, str) and "," in uri:
+            out[key] = base64.b64decode(uri.split(",", 1)[1])
+    return out
+
+
+def seed_model_audio(db: Session, pack: dict[str, bytes]) -> int:
+    """Голос модели — словам и фразам, у которых его ещё нет. Возвращает число привязок."""
+    linked = 0
+    for word in db.execute(select(Word).join(Topic).where(Topic.family_id.is_(None))).unique().scalars():
+        data = pack.get(f"w:{word.text_kk}")
+        if data and word.model_audio_id is None:
+            word.model_audio_id = store(db, data, "audio").id
+            linked += 1
+    for phrase in db.execute(select(Phrase)).unique().scalars():
+        data = pack.get(phrase.key)
+        if data and phrase.model_audio_id is None:
+            phrase.model_audio_id = store(db, data, "audio").id
+            linked += 1
+    db.commit()
+    return linked
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI-обёртка: разбирает аргументы, читает файл, наполняет БД."""
+    """CLI-обёртка: разбирает аргументы, читает файлы, наполняет БД."""
     argv = argv if argv is not None else sys.argv[1:]
     path = resolve_words_js(argv[0] if argv else None)
     topics = parse_words_js(path.read_text(encoding="utf-8"))
+    pack_path = audio_pack_path()
+    pack = parse_audio_pack(pack_path.read_text(encoding="utf-8")) if pack_path else {}
     with SessionLocal() as db:
         topic_count, word_count = seed_topics(db, topics)
-    missing = [
-        entry[0]
-        for topic in topics
-        for entry in topic.get("words") or []
-        if entry[0] not in WORDS_RU
-    ]
-    print(f"Загружено тем: {topic_count}, слов: {word_count} (из {path})")
-    if missing:
-        print("Без русского перевода: " + ", ".join(missing))
+        phrase_count = seed_phrases(db)
+        audio_count = seed_model_audio(db, pack)
+    print(f"Новых категорий: {topic_count}, слов: {word_count}, фраз: {phrase_count}, "
+          f"звуков модели: {audio_count} (из {path})")
     return 0
 
 

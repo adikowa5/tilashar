@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import API, auth_header, login_by_phone
+from tests.conftest import API, auth_header, login_as_guest
 
 
 def test_create_and_list_child(
@@ -93,7 +93,7 @@ def test_other_family_child_is_404(
     client: TestClient, headers: dict[str, str], child: dict[str, object]
 ) -> None:
     """Чужой ребёнок отвечает 404, а не 403 — чтобы не подтверждать его существование."""
-    stranger = auth_header(login_by_phone(client, "+77019998877"))
+    stranger = auth_header(login_as_guest(client))
     child_id = child["id"]
 
     assert client.patch(

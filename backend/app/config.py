@@ -2,7 +2,6 @@
 
 import os
 from functools import lru_cache
-from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,24 +27,32 @@ class Settings(BaseSettings):
     # по значению по умолчанию, и подстановка из других переменных не сработает.
     database_url: str = Field(default="", validate_default=True)
 
-    # Секрет для подписи JWT и для HMAC-хеша SMS-кодов.
+    # Секрет для подписи JWT.
     jwt_secret: str = "dev-secret-change-me"
     jwt_algorithm: str = "HS256"
     access_ttl_min: int = 30
-    refresh_ttl_days: int = 30
-
-    # Отправка SMS: console пишет код в лог, mobizon ходит во внешний API.
-    sms_provider: Literal["console", "mobizon"] = "console"
-    mobizon_api_key: str = ""
-    mobizon_base_url: str = "https://api.mobizon.kz"
+    # Входа по паролю нет, поэтому сессия устройства живёт долго и продлевается
+    # при каждом обновлении токена: семья, открывающая приложение хоть раз в год, не теряется.
+    refresh_ttl_days: int = 400
 
     max_children: int = 4
 
-    # Лимиты на выдачу и ввод SMS-кода.
-    code_ttl_sec: int = 300
-    code_retry_after_sec: int = 60
-    code_requests_per_hour: int = 5
-    code_max_attempts: int = 5
+    # Пароль автора (страница #author). Пусто — редактор выключен.
+    admin_password: str = ""
+    admin_ttl_hours: int = 12
+
+    # Секрет ежедневной уборки: Vercel Cron присылает его в заголовке Authorization.
+    cron_secret: str = ""
+
+    # Ограничения частоты (на один IP-адрес).
+    guest_per_hour: int = 20
+    join_attempts_per_hour: int = 12
+    admin_attempts_per_hour: int = 10
+
+    # Уборка: семьи без единой попытки удаляются через inactive_empty_days без визитов,
+    # любые семьи — через inactive_days.
+    inactive_empty_days: int = 60
+    inactive_days: int = 400
 
     # Урок дня.
     lesson_size: int = 8
@@ -108,9 +115,13 @@ class Settings(BaseSettings):
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
 
     @property
-    def dev_mode(self) -> bool:
-        """В dev-режиме код подтверждения фиксированный и возвращается клиенту."""
-        return self.sms_provider == "console"
+    def jwt_secret_is_default(self) -> bool:
+        """Секрет не задан — подписи токенов можно подделать, редактор автора не включаем."""
+        return self.jwt_secret in ("", "dev-secret-change-me") or len(self.jwt_secret) < 16
+
+    @property
+    def admin_enabled(self) -> bool:
+        return bool(self.admin_password) and not (self.jwt_secret_is_default and os.environ.get("VERCEL"))
 
 
 @lru_cache

@@ -20,7 +20,7 @@ os.environ["MAX_CHILDREN"] = "4"
 os.environ["CORS_ORIGINS"] = "*"
 
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import create_engine, event  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
@@ -44,6 +44,10 @@ def db() -> Iterator[Session]:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # Как в Postgres: внешние ключи с ON DELETE CASCADE должны реально срабатывать.
+    event.listen(engine, "connect", lambda conn, _rec: conn.execute("PRAGMA foreign_keys=ON"))
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     session = factory()
@@ -107,10 +111,9 @@ def content(db: Session) -> dict[str, list[str]]:
     return result
 
 
-def login_by_phone(client: TestClient, phone: str = "+77011234567") -> dict[str, str]:
-    """Полный цикл входа по телефону, возвращает пару токенов."""
-    client.post(f"{API}/auth/code", json={"phone": phone})
-    response = client.post(f"{API}/auth/token", json={"phone": phone, "code": "000000"})
+def login_as_guest(client: TestClient) -> dict[str, str]:
+    """Новая семья на «устройстве», возвращает пару токенов."""
+    response = client.post(f"{API}/auth/guest")
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -122,8 +125,8 @@ def auth_header(tokens: dict[str, str]) -> dict[str, str]:
 
 @pytest.fixture()
 def tokens(client: TestClient) -> dict[str, str]:
-    """Авторизованный родитель с телефоном."""
-    return login_by_phone(client)
+    """Устройство семьи с сессией."""
+    return login_as_guest(client)
 
 
 @pytest.fixture()

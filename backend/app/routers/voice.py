@@ -1,4 +1,6 @@
-"""Родительские записи голоса: список, загрузка, отдача и удаление.
+"""Родительские записи похвалы («Керемет!», «Жарайсың!» …): список, загрузка, отдача, удаление.
+
+Слова уроков озвучивает автор (см. admin.py), семья записывает только фразы p:*.
 
 Содержимое хранится в БД (serverless-хостинг не даёт постоянного диска) и отдаётся
 по адресу /api/v1/voices/audio/<sha256>.wav. Этот адрес не требует токена: 256-битный
@@ -25,8 +27,8 @@ from app.schemas import VoiceOut
 
 router = APIRouter(tags=["voice"])
 
-# Ключ записи: w:<слово> или p:<фраза>.
-KEY_RE = re.compile(r"^[wp]:.{1,64}$", re.DOTALL)
+# Ключ записи — только фраза похвалы: p:great, p:good …
+KEY_RE = re.compile(r"^p:[a-z_]{1,32}$")
 
 ALLOWED_CONTENT_TYPES = {"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"}
 
@@ -93,6 +95,10 @@ def put_voice(
         )
     if not payload:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_empty")
+    if payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="unsupported_media_type"
+        )
 
     digest = hashlib.sha256(payload).hexdigest()
     url = f"/api/v1/voices/audio/{digest}.wav"

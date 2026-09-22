@@ -35,13 +35,21 @@ def utcnow() -> datetime:
 
 
 class Family(Base):
-    """Семья — владелец детей, своих тем и родительских записей голоса."""
+    """Семья — владелец детей и родительских записей похвалы.
+
+    Регистрации нет: семья создаётся на первом устройстве, остальные устройства
+    подключаются по коду семьи (join_code). Личных данных родителя не храним.
+    """
 
     __tablename__ = "families"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     model_voice: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Код для подключения второго устройства, вида ABCD2345. Выдаётся по запросу.
+    join_code: Mapped[str | None] = mapped_column(String(16), unique=True, nullable=True)
+    # Когда семья последний раз открывала приложение — по нему чистим брошенные семьи.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
     users: Mapped[list[User]] = relationship(back_populates="family")
@@ -49,7 +57,7 @@ class Family(Base):
 
 
 class User(Base):
-    """Родитель. У гостевой семьи телефон пустой до вызова /auth/claim."""
+    """Устройство семьи. Один пользователь = одно подключённое устройство, без личных данных."""
 
     __tablename__ = "users"
 
@@ -57,7 +65,6 @@ class User(Base):
     family_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    phone: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     locale: Mapped[str] = mapped_column(String(8), nullable=False, default="ru")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
@@ -84,17 +91,38 @@ class Child(Base):
     family: Mapped[Family] = relationship(back_populates="children")
 
 
-class AuthCode(Base):
-    """Одноразовый SMS-код. Хранится только HMAC-хеш, сам код в БД не попадает."""
+class RateHit(Base):
+    """Отметка о действии для ограничения частоты (гости, вход по коду, вход автора).
 
-    __tablename__ = "auth_codes"
+    Процессы на Vercel живут недолго, поэтому счётчики храним в базе.
+    Старые отметки удаляет ежедневная уборка.
+    """
+
+    __tablename__ = "rate_hits"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, index=True)
+
+
+class Media(Base):
+    """Файл в базе: запись голоса автора, звук модели или картинка.
+
+    Отдаётся по /api/v1/media/<sha256>.<ext> без авторизации и кешируется навсегда:
+    содержимое по одному адресу никогда не меняется.
+    """
+
+    __tablename__ = "media"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)          # audio | image
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    ext: Mapped[str] = mapped_column(String(8), nullable=False)
+    # deferred: байты грузятся только при отдаче файла, а не при каждом чтении каталога.
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
@@ -127,8 +155,15 @@ class Topic(Base):
         String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=True, index=True
     )
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    image_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    # Неопубликованную категорию видит только автор — удобно готовить её заранее.
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
+    image: Mapped[Media | None] = relationship(foreign_keys=[image_id], lazy="joined")
     words: Mapped[list[Word]] = relationship(
         back_populates="topic", cascade="all, delete-orphan", order_by="Word.order_index"
     )
@@ -137,7 +172,11 @@ class Topic(Base):
 
 
 class Word(Base):
-    """Слово темы. pic — эмодзи, hex-цвет или цифра; audio_key — ключ в паке озвучки."""
+    """Слово темы. pic — эмодзи, hex-цвет или цифра (запасная картинка).
+
+    audio_id — запись автора, model_audio_id — синтезированный голос (запасной),
+    image_id — загруженная автором картинка.
+    """
 
     __tablename__ = "words"
 
@@ -151,8 +190,21 @@ class Word(Base):
     pic: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     audio_key: Mapped[str] = mapped_column(String(80), nullable=False, default="")
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    audio_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    model_audio_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    image_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
     topic: Mapped[Topic] = relationship(back_populates="words")
+    audio: Mapped[Media | None] = relationship(foreign_keys=[audio_id], lazy="joined")
+    model_audio: Mapped[Media | None] = relationship(foreign_keys=[model_audio_id], lazy="joined")
+    image: Mapped[Media | None] = relationship(foreign_keys=[image_id], lazy="joined")
 
 
 class Progress(Base):
@@ -231,7 +283,7 @@ class VoiceRecord(Base):
     key: Mapped[str] = mapped_column(String(80), nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     # Содержимое лежит в БД: serverless-окружение не имеет постоянного диска.
-    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -239,3 +291,27 @@ class VoiceRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
     __table_args__ = (UniqueConstraint("family_id", "key", name="uq_voice_family_key"),)
+
+
+class Phrase(Base):
+    """Фраза похвалы или подсказки (p:great, p:good …).
+
+    Голос автора звучит у всех; семья может перезаписать фразу своим голосом (VoiceRecord).
+    """
+
+    __tablename__ = "phrases"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    text_kk: Mapped[str] = mapped_column(String(128), nullable=False)
+    text_ru: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    audio_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    model_audio_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    audio: Mapped[Media | None] = relationship(foreign_keys=[audio_id], lazy="joined")
+    model_audio: Mapped[Media | None] = relationship(foreign_keys=[model_audio_id], lazy="joined")

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.deps import build_child_out, current_family, current_user, get_db
-from app.models import Child, Family, User
+from app.models import Child, Family, User, utcnow
 from app.schemas import FamilyOut, FamilyPatch, MeOut, UserOut, UserPatch
 
 router = APIRouter(tags=["me"])
@@ -20,6 +22,10 @@ def read_me(
     family: Family = Depends(current_family),
 ) -> MeOut:
     """Пользователь, его семья и список активных детей — один запрос на старте приложения."""
+    now = utcnow()
+    if family.last_seen_at is None or now - family.last_seen_at > timedelta(hours=12):
+        family.last_seen_at = now
+        db.commit()
     children = db.execute(
         select(Child)
         .where(Child.family_id == family.id, Child.deleted_at.is_(None))

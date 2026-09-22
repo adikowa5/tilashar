@@ -11,23 +11,16 @@ from pydantic import BaseModel, ConfigDict, Field
 # --------------------------------------------------------------------------- auth
 
 
-class PhoneIn(BaseModel):
-    phone: str
-
-
-class CodeIn(BaseModel):
-    phone: str
-    code: str
-
-
 class RefreshIn(BaseModel):
     refresh_token: str
 
 
-class CodeSent(BaseModel):
-    sent: bool
-    dev_code: str | None = None
-    retry_after: int
+class JoinIn(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+class FamilyCodeOut(BaseModel):
+    code: str
 
 
 class TokenPair(BaseModel):
@@ -44,7 +37,6 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    phone: str | None
     locale: str
     created_at: datetime
 
@@ -144,6 +136,109 @@ class TopicCreate(BaseModel):
     words: list[WordIn] = Field(default_factory=list, max_length=40)
 
 
+class CatalogWord(BaseModel):
+    id: str
+    text_kk: str
+    text_ru: str
+    syllables: str
+    pic: str
+    image_url: str | None = None
+    audio_url: str | None = None
+    model_audio_url: str | None = None
+
+
+class CatalogTopic(BaseModel):
+    id: str
+    slug: str
+    title_kk: str
+    title_ru: str
+    pic: str
+    image_url: str | None = None
+    is_published: bool = True
+    order_index: int = 0
+    words: list[CatalogWord]
+
+
+class CatalogPhrase(BaseModel):
+    key: str
+    text_kk: str
+    text_ru: str
+    audio_url: str | None = None
+    model_audio_url: str | None = None
+
+
+class CatalogOut(BaseModel):
+    version: str
+    topics: list[CatalogTopic]
+    phrases: list[CatalogPhrase]
+
+
+# --------------------------------------------------------------------------- автор
+
+
+class AdminLoginIn(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+
+
+class AdminTokenOut(BaseModel):
+    token: str
+    expires_in: int
+
+
+class AdminTopicIn(BaseModel):
+    title_kk: str = Field(min_length=1, max_length=128)
+    title_ru: str = Field(default="", max_length=128)
+    pic: str = Field(default="", max_length=64)
+    is_published: bool = False
+
+
+class AdminTopicPatch(BaseModel):
+    title_kk: str | None = Field(default=None, min_length=1, max_length=128)
+    title_ru: str | None = Field(default=None, max_length=128)
+    pic: str | None = Field(default=None, max_length=64)
+    is_published: bool | None = None
+
+
+class AdminWordIn(BaseModel):
+    text_kk: str = Field(min_length=1, max_length=64)
+    text_ru: str = Field(default="", max_length=64)
+    syllables: str = Field(default="", max_length=96)
+    pic: str = Field(default="", max_length=64)
+
+
+class AdminWordPatch(BaseModel):
+    text_kk: str | None = Field(default=None, min_length=1, max_length=64)
+    text_ru: str | None = Field(default=None, max_length=64)
+    syllables: str | None = Field(default=None, max_length=96)
+    pic: str | None = Field(default=None, max_length=64)
+    topic_id: str | None = None
+
+
+class AdminWordsBulkIn(BaseModel):
+    words: list[AdminWordIn] = Field(min_length=1, max_length=200)
+
+
+class AdminOrderIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class AdminPhrasePatch(BaseModel):
+    text_kk: str | None = Field(default=None, min_length=1, max_length=128)
+    text_ru: str | None = Field(default=None, max_length=128)
+
+
+class AdminStatsOut(BaseModel):
+    families: int
+    families_active_7d: int
+    children: int
+    attempts_today: int
+    attempts_7d: int
+    topics: int
+    words: int
+    words_with_voice: int
+    media_mb: float
+
+
 # --------------------------------------------------------------------------- урок дня
 
 
@@ -201,7 +296,5 @@ class HealthOut(BaseModel):
 
 
 class ConfigOut(BaseModel):
-    sms_provider: str
-    dev_mode: bool
     max_children: int
     version: str

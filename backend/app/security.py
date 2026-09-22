@@ -1,4 +1,4 @@
-"""Криптография: хеш SMS-кода, выпуск и проверка JWT, ротация refresh-токенов."""
+"""Криптография: выпуск и проверка JWT, ротация refresh-токенов, токен автора."""
 
 from __future__ import annotations
 
@@ -17,22 +17,11 @@ from app.models import RefreshToken, User, utcnow
 
 TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
+TOKEN_TYPE_ADMIN = "admin"
 
 
 class TokenError(Exception):
     """Токен невалиден, истёк, отозван или имеет неверный тип."""
-
-
-def hash_code(code: str) -> str:
-    """HMAC-SHA256 от кода на секрете приложения. В БД хранится только он."""
-    return hmac.new(
-        settings.jwt_secret.encode("utf-8"), code.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-
-
-def verify_code(code: str, code_hash: str) -> bool:
-    """Сравнение кода с хешем за постоянное время."""
-    return hmac.compare_digest(hash_code(code), code_hash)
 
 
 def _encode(payload: dict[str, Any]) -> str:
@@ -122,3 +111,46 @@ def revoke_refresh_token(db: Session, token: str) -> None:
     """Отзывает refresh-токен (logout). Невалидный токен приводит к TokenError."""
     row, _user = _load_live_refresh(db, token)
     row.revoked_at = utcnow()
+
+
+# --------------------------------------------------------------------------- автор
+
+
+def _admin_key() -> str:
+    """Ключ подписи токена автора зависит и от пароля: сменили пароль — старые токены умерли."""
+    return hmac.new(
+        settings.jwt_secret.encode("utf-8"),
+        ("admin:" + settings.admin_password).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def check_admin_password(password: str) -> bool:
+    if not settings.admin_password:
+        return False
+    return hmac.compare_digest(
+        hashlib.sha256(password.encode("utf-8")).digest(),
+        hashlib.sha256(settings.admin_password.encode("utf-8")).digest(),
+    )
+
+
+def create_admin_token() -> tuple[str, int]:
+    issued = datetime.now(timezone.utc)
+    ttl = settings.admin_ttl_hours * 3600
+    token = jwt.encode(
+        {"sub": "author", "type": TOKEN_TYPE_ADMIN, "iat": int(issued.timestamp()),
+         "exp": int(issued.timestamp()) + ttl},
+        _admin_key(),
+        algorithm=settings.jwt_algorithm,
+    )
+    return token, ttl
+
+
+def verify_admin_token(token: str) -> bool:
+    if not settings.admin_enabled:
+        return False
+    try:
+        payload = jwt.decode(token, _admin_key(), algorithms=[settings.jwt_algorithm])
+    except jwt.PyJWTError:
+        return False
+    return payload.get("type") == TOKEN_TYPE_ADMIN

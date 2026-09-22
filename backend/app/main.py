@@ -14,7 +14,7 @@ from sqlalchemy import text
 from app import __version__
 from app.config import settings
 from app.db import SessionLocal
-from app.routers import auth, children, content, lesson, me, voice
+from app.routers import admin, auth, children, content, internal, lesson, me, voice
 from app.schemas import ConfigOut, HealthOut
 
 logging.basicConfig(level=logging.INFO)
@@ -79,8 +79,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for module in (auth, me, children, content, lesson, voice):
+    for module in (auth, me, children, content, lesson, voice, admin, internal):
         app.include_router(module.router, prefix=API_PREFIX)
+    app.include_router(content.files_router, prefix=API_PREFIX)
 
     @app.exception_handler(RequestValidationError)
     def _validation_handler(_request, _exc: RequestValidationError) -> JSONResponse:
@@ -102,8 +103,6 @@ def create_app() -> FastAPI:
     def read_config() -> ConfigOut:
         """Публичные настройки, которые нужны клиенту до логина."""
         return ConfigOut(
-            sms_provider=settings.sms_provider,
-            dev_mode=settings.dev_mode,
             max_children=settings.max_children,
             version=__version__,
         )

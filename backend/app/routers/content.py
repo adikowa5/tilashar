@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.deps import current_family, get_db
-from app.models import Family, Topic, Word
-from app.schemas import TopicCreate, TopicDetail, TopicOut, WordOut
+from app.catalog import build_catalog
+from app.models import Family, Media, Topic, Word
+from app.schemas import CatalogOut, TopicCreate, TopicDetail, TopicOut, WordOut
 
 router = APIRouter(prefix="/content", tags=["content"])
+files_router = APIRouter(tags=["content"])
 
 # Транслитерация казахской кириллицы в латиницу для slug'ов пользовательских тем.
 TRANSLIT = {
@@ -66,7 +68,12 @@ def visible_topics(db: Session, family_id: str) -> list[Topic]:
     return list(
         db.execute(
             select(Topic)
-            .where(or_(Topic.family_id.is_(None), Topic.family_id == family_id))
+            .where(
+                or_(
+                    and_(Topic.family_id.is_(None), Topic.is_published.is_(True)),
+                    Topic.family_id == family_id,
+                )
+            )
             .order_by(Topic.kind, Topic.order_index, Topic.created_at)
         ).scalars()
     )
@@ -163,3 +170,36 @@ def create_topic(
 
     base = _to_topic_out(topic)
     return TopicDetail(**base.model_dump(), words=[_to_word_out(w) for w in topic.words])
+
+
+@router.get("/catalog", response_model=CatalogOut)
+def read_catalog(request: Request, response: Response, db: Session = Depends(get_db)) -> CatalogOut | Response:
+    """Весь опубликованный материал одним ответом. Без авторизации: он общий для всех.
+
+    ETag = версия каталога: если у клиента та же версия, отвечаем 304 без тела.
+    """
+    catalog = build_catalog(db)
+    etag = f'"{catalog.version}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "no-cache"
+    return catalog
+
+
+@files_router.get("/media/{digest}.{ext}")
+def read_media(digest: str, ext: str, db: Session = Depends(get_db)) -> Response:
+    """Файл по хешу содержимого. Адрес никогда не меняет содержимое — кешируем навсегда."""
+    if not re.fullmatch(r"[0-9a-f]{64}", digest or ""):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="media_not_found")
+    media = db.execute(select(Media).where(Media.sha256 == digest)).scalar_one_or_none()
+    if media is None or media.ext != ext:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="media_not_found")
+    return Response(
+        content=media.data,
+        media_type=media.content_type,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
