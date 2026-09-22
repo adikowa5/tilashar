@@ -7,7 +7,8 @@ import { state, activeChild, recordStars, syncToday } from "../state.js";
 import { api, hasSession } from "../api.js";
 import { t } from "../i18n.js";
 import { ICON, $, esc, sleep, picHTML, tintOf, wordHTML, sylls, starsRow, confetti } from "../ui.js";
-import { play, playWav, stopAudio } from "../audio.js";
+import { play, playWav, stopAudio, warm } from "../audio.js";
+import { PHRASE_KEYS } from "../voices.js";
 import { recordOnce, stopOnce } from "../recorder.js";
 import { SR, listen, score, tipFor, activeRec, abortListening, micEnv } from "../speech.js";
 
@@ -35,6 +36,8 @@ export function render(params){
     };
     pending = [];
     if (micMode !== "manual") micMode = initialMode();
+    // Звуки урока — заранее: первое «тыңда» звучит без паузы, а файлы остаются в кеше для офлайна.
+    warm(L.words.map(w => "w:" + w[0]).concat(PHRASE_KEYS));
   }
   if (!L) return navigate("today");
   paint();

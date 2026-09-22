@@ -1,18 +1,16 @@
-/* Студия записи голоса родителя — перенесено из прототипа.
-   Источник записей теперь voices.js (API + фолбэк IndexedDB). */
+/* Студия родителя: только фразы похвалы («Керемет!», «Жарайсың!» …).
+   Слова уроков озвучивает автор в редакторе (#author). Записи — voices.js (API + IndexedDB). */
 
 import { navigate, viewEl, currentView } from "../main.js";
-import { allTopics, topicById } from "../state.js";
 import { t } from "../i18n.js";
-import { ICON, $, esc, picHTML, tintOf } from "../ui.js";
-import { play, stopAudio, audioCtx, AUDIO } from "../audio.js";
+import { ICON, $, esc } from "../ui.js";
+import { play, stopAudio, audioCtx, hasAudio } from "../audio.js";
 import { Rec, processTake } from "../recorder.js";
 import {
   VOICES, voiceStore, voiceKeys, recordedCount, keyToId,
-  saveVoice, deleteVoice, setModelVoice, modelVoiceOn, onVoices, PHRASE_KEYS
+  saveVoice, deleteVoice, onVoices, PHRASE_KEYS
 } from "../voices.js";
 
-let studioTab = null;
 let take = { key: null };
 let unVoices = null;
 
@@ -37,11 +35,10 @@ function saveErrorText(e){
   return t("err_save");
 }
 
-export function render(){
+export function render(params = {}){
+  // Студия — только через «взрослую дверь», чтобы ребёнок не перезаписал похвалу.
+  if (!params.unlocked) return navigate("parent", { next: "studio" });
   const view = viewEl();
-  const topics = allTopics();
-  if (!studioTab || (studioTab !== "phrases" && !topics.some(x => x.id === studioTab)))
-    studioTab = (topics.find(x => !x.custom) || {}).id || "phrases";
   const storeNote = { api: t("store_db"), idb: t("store_idb"), memory: t("store_memory"), pending: "" }[voiceStore.kind];
 
   view.innerHTML = `
@@ -61,20 +58,14 @@ export function render(){
       <div class="studio-ctrl">
         <p class="mic-state" id="micState"><span class="led"></span><span id="micText">${t("mic_off")}</span></p>
         <div class="level" aria-hidden="true"><i id="lvl"></i></div>
-        <label class="switch" for="modelVoice"><input type="checkbox" id="modelVoice" ${modelVoiceOn() ? "checked" : ""}><span>${t("model_voice_label")}</span></label>
         <p class="note" id="storeNote">${esc(storeNote)}</p>
         <p class="status" id="studioStatus" role="status"></p>
       </div>
     </div>
-    <div class="tabs" id="tabs"></div>
     <ul class="rec-list" id="recList"></ul>
   </section>`;
 
   $("#home").onclick = () => navigate("today");
-  $("#modelVoice").onchange = async e => {
-    try { await setModelVoice(e.target.checked); }
-    catch (err){ e.target.checked = modelVoiceOn(); $("#studioStatus").textContent = saveErrorText(err); }
-  };
   renderBody();
 
   if (unVoices) unVoices();
@@ -82,32 +73,18 @@ export function render(){
     if (currentView() !== "studio" || take.key) return;
     renderBody();
     const n = $("#storeNote");
-    if (n && !n.textContent && voiceStore.kind !== "pending") render();
+    if (n && !n.textContent && voiceStore.kind !== "pending") render({ unlocked: true });
   });
 }
 
 function renderBody(){
   if (currentView() !== "studio") return;
-  const topics = allTopics();
   const allKeys = voiceKeys();
   $("#recTotal").textContent = `${recordedCount(allKeys)} / ${allKeys.length} ${t("recorded_suffix")}`;
-  const tm = $("#modelVoice"); if (tm) tm.checked = modelVoiceOn();
-
-  const tabs = [...topics.map(x => ({ id: x.id, title: x.title, keys: x.words.map(w => "w:" + w[0]) })),
-                { id: "phrases", title: t("phrases_tab"), keys: PHRASE_KEYS.slice() }];
-  $("#tabs").innerHTML = tabs.map(x => `<button class="chip" type="button" data-tab="${esc(x.id)}" aria-pressed="${x.id === studioTab}">${esc(x.title)}<small>${recordedCount(x.keys)}/${x.keys.length}</small></button>`).join("");
-  $("#tabs").querySelectorAll(".chip").forEach(c => c.onclick = () => { if (take.key) return; studioTab = c.dataset.tab; renderBody(); });
-
-  let rows;
-  if (studioTab === "phrases"){
-    rows = PHRASE_KEYS.map(key => ({
-      key, label: t("phrase_" + key), phrase: true,
-      pic: `<span class="plate" style="--tint:var(--t-custom)"><span class="quote">«»</span></span>`
-    }));
-  } else {
-    const tp = topicById(studioTab) || topics[0];
-    rows = tp.words.map(w => ({ key: "w:" + w[0], label: w[0], pic: `<span class="plate" style="--tint:${tintOf(tp)}">${picHTML(w)}</span>` }));
-  }
+  const rows = PHRASE_KEYS.map(key => ({
+    key, label: t("phrase_" + key), phrase: true,
+    pic: `<span class="plate" style="--tint:var(--t-custom)"><span class="quote">«»</span></span>`
+  }));
 
   const list = $("#recList");
   list.innerHTML = rows.map(r => {
@@ -117,7 +94,7 @@ function renderBody(){
       <span class="rec-word"><b lang="kk">${esc(r.label)}</b><small>${rec ? esc(t("rec_done", { dur: String(rec.dur).replace(".", ",") })) : t("rec_none")}</small></span>
       <span class="rec-actions">
         <button class="btn rec-btn" type="button" data-act="rec">${ICON.mic}${t("rec_btn")}</button>
-        <button class="icon-btn" type="button" data-act="play" aria-label="${esc(t("rec_listen_aria", { label: r.label }))}"${rec || (modelVoiceOn() && AUDIO[r.key]) ? "" : " disabled"}>${ICON.play}</button>
+        <button class="icon-btn" type="button" data-act="play" aria-label="${esc(t("rec_listen_aria", { label: r.label }))}"${rec || hasAudio(r.key) ? "" : " disabled"}>${ICON.play}</button>
         <label class="icon-btn" for="f-${id}" title="${t("rec_file_title")}"><input class="sr" type="file" accept="audio/*" id="f-${id}" data-act="file">${ICON.upload}<span class="sr">${esc(t("rec_file_aria", { label: r.label }))}</span></label>
         <button class="icon-btn" type="button" data-act="del" aria-label="${esc(t("rec_del_aria", { label: r.label }))}"${rec ? "" : " disabled"}>${ICON.trash}</button>
       </span>

@@ -12,7 +12,9 @@ export const state = {
   family: null,
   children: [],
   activeChildId: null,
-  topics: [],                 // нормализованные темы (встроенные + семейные)
+  topics: [],                 // нормализованные категории из каталога
+  phrases: [],                // фразы похвалы: {key, text_kk, text_ru, audio, modelAudio}
+  catalogVersion: "",
   customTopics: [],           // темы, придуманные «ұстазом» и ещё не ушедшие на сервер
   progress: {},               // word_id -> {stars, attempts}
   bestStars: {},              // текст слова -> лучшие звёзды (для плиток тем)
@@ -31,16 +33,34 @@ export function patch(next){ Object.assign(state, next); saveCache(); emit(); }
 export function saveCache(){
   store.set("cache", {
     user: state.user, family: state.family, children: state.children,
-    activeChildId: state.activeChildId, topics: state.topics, customTopics: state.customTopics,
+    activeChildId: state.activeChildId, topics: state.topics.map(packTopic), customTopics: state.customTopics.map(packTopic),
+    phrases: state.phrases, catalogVersion: state.catalogVersion,
     progress: state.progress, bestStars: state.bestStars, settings: state.settings, guest: state.guest
   });
 }
 export function loadCache(){
   const c = store.get("cache", null);
-  if (c) Object.assign(state, c, { settings: Object.assign({}, state.settings, c.settings) });
+  if (c){
+    Object.assign(state, c, { settings: Object.assign({}, state.settings, c.settings) });
+    state.topics = (c.topics || []).map(unpackTopic);
+    state.customTopics = (c.customTopics || []).map(unpackTopic);
+    state.phrases = c.phrases || [];
+  }
   if (!state.topics.length) state.topics = BUILTIN.map(normalizeBuiltin);
+  rebuildAudioIndex();
   setLocale(state.settings.childLocale || "kk");
 }
+
+/* ---------- звук по ключу: w:<слово> и p:<фраза> -> {url, model} ---------- */
+const AUDIO_INDEX = new Map();
+function rebuildAudioIndex(){
+  AUDIO_INDEX.clear();
+  state.topics.forEach(tp => tp.words.forEach(w => {
+    if (w.audio || w.modelAudio) AUDIO_INDEX.set("w:" + w[0], { url: w.audio || null, model: w.modelAudio || null });
+  }));
+  state.phrases.forEach(p => AUDIO_INDEX.set(p.key, { url: p.audio || null, model: p.modelAudio || null }));
+}
+export const audioFor = key => AUDIO_INDEX.get(key) || null;
 
 /* ---------- нормализация тем ----------
    Внутренний вид темы совпадает с прототипом: {id, title, pic, words:[[text,pic,syllables]]},
@@ -63,8 +83,27 @@ export function normalizeApiTopic(t, locale){
     title_kk: t.title_kk, title_ru: t.title_ru,
     pic: t.pic, kind: t.kind || "builtin", custom: t.kind === "family"
   };
-  topic.words = (t.words || []).map(w => word(w.text_kk || w.text || "", w.pic, w.syllables, w.id || (topic.slug + ":" + (w.text_kk || ""))));
+  topic.img = t.image_url || null;
+  topic.words = (t.words || []).map(w => {
+    const x = word(w.text_kk || w.text || "", w.pic, w.syllables, w.id || (topic.slug + ":" + (w.text_kk || "")));
+    x.ru = w.text_ru || "";
+    x.img = w.image_url || null;
+    x.audio = w.audio_url || null;
+    x.modelAudio = w.model_audio_url || null;
+    return x;
+  });
   return topic;
+}
+
+/* JSON.stringify теряет свойства массивов (w.id, w.audio …) — в кеше храним слово объектом. */
+function packTopic(tp){ return Object.assign({}, tp, { words: tp.words.map(w => ({ a: [w[0], w[1], w[2]], id: w.id, ru: w.ru, img: w.img, audio: w.audio, modelAudio: w.modelAudio })) }); }
+function unpackTopic(tp){
+  return Object.assign({}, tp, { words: (tp.words || []).map(w => {
+    if (Array.isArray(w)) return w;
+    const x = word(w.a[0], w.a[1], w.a[2], w.id);
+    Object.assign(x, { ru: w.ru, img: w.img, audio: w.audio, modelAudio: w.modelAudio });
+    return x;
+  }) });
 }
 export const allTopics = () => [...state.customTopics, ...state.topics];
 export const topicById = id => allTopics().find(t => t.id === id || t.slug === id) || null;
@@ -134,15 +173,23 @@ export async function syncMe(){
 }
 
 export async function syncTopics(){
-  if (!hasSession() || !isOnline()) return false;
+  if (!isOnline()) return false;
   try {
-    const list = await api.topics();
-    const full = await Promise.all(list.map(async t => {
-      if (t.words) return t;
-      try { return await api.topic(t.slug || t.id); } catch { return null; }
+    const cat = await api.catalog();
+    if (!cat || !Array.isArray(cat.topics)) return false;
+    if (cat.version && cat.version === state.catalogVersion && state.topics.length){
+      const loc = state.settings.childLocale || "kk";
+      state.topics.forEach(tp => { tp.title = (loc === "ru" ? tp.title_ru : tp.title_kk) || tp.title; });
+      return true;
+    }
+    const topics = cat.topics.map(t => normalizeApiTopic(t));
+    state.phrases = (cat.phrases || []).map(p => ({
+      key: p.key, text_kk: p.text_kk, text_ru: p.text_ru, audio: p.audio_url || null, modelAudio: p.model_audio_url || null
     }));
-    const topics = full.filter(Boolean).map(t => normalizeApiTopic(t));
-    if (topics.length){ state.topics = topics; saveCache(); emit(); }
+    if (topics.length) state.topics = topics;
+    state.catalogVersion = cat.version || "";
+    rebuildAudioIndex();
+    saveCache(); emit();
     return true;
   } catch { return false; }
 }

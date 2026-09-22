@@ -1,15 +1,16 @@
-/* Родительская зона: список детей, язык интерфейса ребёнка и родителя,
-   переключатель модельного голоса. Вход — через «взрослую дверь»: задача на умножение. */
+/* Родительская зона: дети, код семьи, язык интерфейса, голос модели, запись похвалы.
+   Вход — через «взрослую дверь»: задача на умножение. */
 
 import { navigate, viewEl, openMicHelp } from "../main.js";
 import { state, setSetting, setActiveChild, signOut, syncMe } from "../state.js";
-import { hasSession, isOnline } from "../api.js";
+import { api, hasSession, isOnline } from "../api.js";
 import { t, setLocale } from "../i18n.js";
 import { ICON, $, esc, avatarHTML } from "../ui.js";
 import { modelVoiceOn, setModelVoice } from "../voices.js";
 
 let unlocked = false;
 let gate = null;
+let opts = {};
 
 export function leave(){ unlocked = false; gate = null; }
 
@@ -19,8 +20,14 @@ function newGate(){
   return { a, b, answer: a * b };
 }
 
-export function render(){
+export function render(params = {}){
+  opts = params || {};
   if (!unlocked){ gate = gate || newGate(); return renderGate(); }
+  afterUnlock();
+}
+
+function afterUnlock(){
+  if (opts.next){ const next = opts.next; opts = {}; return navigate(next, { unlocked: true }); }
   renderZone();
 }
 
@@ -48,7 +55,7 @@ function renderGate(){
   $("#ans").focus();
   $("#f").onsubmit = e => {
     e.preventDefault();
-    if (+$("#ans").value.trim() === gate.answer){ unlocked = true; renderZone(); }
+    if (+$("#ans").value.trim() === gate.answer){ unlocked = true; afterUnlock(); }
     else { $("#st").textContent = t("pz_gate_wrong"); gate = newGate(); render(); }
   };
   $("#back").onclick = () => navigate("today");
@@ -74,16 +81,36 @@ function renderZone(){
       <div>
         <p class="eyebrow">${t("pz_eyebrow")}</p>
         <h2>${t("pz_head")}</h2>
-        ${state.guest ? `<p class="note">${t("pz_guest_note")}</p>` : ""}
       </div>
       <div class="studio-ctrl">
         <label class="switch" for="mv"><input type="checkbox" id="mv" ${modelVoiceOn() ? "checked" : ""}><span>${t("pz_model_voice")}</span></label>
         <button class="btn red" id="toStudio" type="button">${ICON.mic}${t("pz_voice_studio")}</button>
         <button class="btn ghost" id="toMicHelp" type="button">${t("pz_mic_help")}</button>
         ${hasSession() ? `<button class="btn ghost" id="logout" type="button">${t("pz_logout")}</button>` : ""}
+        <p class="note" id="logoutNote" hidden>${t("pz_logout_warn")}</p>
         <p class="status" id="st"></p>
       </div>
     </div>
+
+    ${hasSession() ? `<section class="ai-band patch code-band" id="codeBand">
+      <div>
+        <p class="eyebrow">${t("pz_eyebrow")}</p>
+        <h2>${t("pz_code_head")}</h2>
+        <p class="note">${t("pz_code_note")}</p>
+      </div>
+      <div class="code-side">
+        <p class="family-code" id="famCode" aria-live="polite">····-····</p>
+        <div class="ai-row">
+          <button class="btn" id="copyCode" type="button">${t("pz_code_copy")}</button>
+          <button class="btn" id="shareCode" type="button">${t("pz_code_share")}</button>
+        </div>
+        <div class="ai-row">
+          <button class="btn ghost small" id="newCode" type="button">${t("pz_code_new")}</button>
+          <button class="btn ghost small" id="joinOther" type="button">${t("pz_code_join")}</button>
+        </div>
+        <p class="status" id="codeSt"></p>
+      </div>
+    </section>` : ""}
 
     <div class="section-head"><h2>${t("pz_children")}</h2></div>
     <div class="kids kids-grid">
@@ -112,12 +139,18 @@ function renderZone(){
   </section>`;
 
   $("#back").onclick = () => navigate("today");
-  $("#toStudio").onclick = () => navigate("studio");
+  $("#toStudio").onclick = () => navigate("studio", { unlocked: true });
   $("#toMicHelp").onclick = () => openMicHelp();
   $("#addKid").onclick = () => navigate("children", { add: true });
   view.querySelectorAll(".kid[data-id]").forEach(b => b.onclick = () => { setActiveChild(b.dataset.id); renderZone(); });
   $("#mv").onchange = async e => { await setModelVoice(e.target.checked); };
-  if ($("#logout")) $("#logout").onclick = async () => { await signOut(); navigate("onboarding"); };
+  if ($("#logout")) $("#logout").onclick = async () => {
+    const note = $("#logoutNote");
+    if (note.hidden){ note.hidden = false; $("#logout").textContent = t("pz_logout_confirm"); return; }
+    await signOut(); navigate("onboarding");
+  };
+  if ($("#codeBand")) wireCode();
+  if (opts.showCode && $("#codeBand")) $("#codeBand").scrollIntoView({ block: "center" });
 
   const bind = (id, key) => $("#" + id).querySelectorAll("[data-lang]").forEach(b => b.onclick = async () => {
     const l = b.dataset.lang;
@@ -130,4 +163,38 @@ function renderZone(){
   bind("parentLang", "parentLocale");
 
   if (hasSession() && isOnline()) syncMe();
+}
+
+/* ---------- код семьи ---------- */
+let familyCode = "";
+function inviteLink(code){ return location.origin + "/?join=" + encodeURIComponent(code); }
+
+async function wireCode(){
+  const box = $("#famCode"), st = $("#codeSt");
+  const show = code => { familyCode = code; if (box) box.textContent = code; };
+  if (familyCode) show(familyCode);
+  if (!isOnline()){ st.textContent = t("err_network"); return; }
+  try { show((await api.familyCode()).code); } catch { st.textContent = t("err_network"); }
+
+  $("#copyCode").onclick = async () => {
+    if (!familyCode) return;
+    try { await navigator.clipboard.writeText(familyCode); st.textContent = t("pz_code_copied"); }
+    catch { st.textContent = familyCode; }
+  };
+  $("#shareCode").onclick = async () => {
+    if (!familyCode) return;
+    const url = inviteLink(familyCode);
+    if (navigator.share){
+      try { await navigator.share({ title: t("app_title"), text: t("pz_code_share_text", { code: familyCode }), url }); return; } catch { return; }
+    }
+    try { await navigator.clipboard.writeText(url); st.textContent = t("pz_code_link_copied"); } catch { st.textContent = url; }
+  };
+  $("#newCode").onclick = async () => {
+    const btn = $("#newCode");
+    if (!btn.dataset.sure){ btn.dataset.sure = "1"; btn.textContent = t("pz_code_new_confirm"); st.textContent = t("pz_code_new_warn"); return; }
+    try { show((await api.newFamilyCode()).code); st.textContent = t("pz_code_new_done"); }
+    catch { st.textContent = t("err_network"); }
+    delete btn.dataset.sure; btn.textContent = t("pz_code_new");
+  };
+  $("#joinOther").onclick = () => navigate("onboarding", { step: "join" });
 }

@@ -145,7 +145,7 @@ export function render(){
   $("#whoBtn").onclick = () => navigate("children");
   $("#parentBtn").onclick = () => navigate("parent");
   $("#go").onclick = () => startDay(plan);
-  $("#toStudio").onclick = () => navigate("studio");
+  $("#toStudio").onclick = () => navigate("parent", { next: "studio" });
   if (wotd){
     $("#wotdPlay").onclick = () => play("w:" + wotd.w[0]);
     $("#wotdGo").onclick = () => navigate("lesson", { topic: wotd.t, words: wotd.t.words });

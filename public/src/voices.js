@@ -1,8 +1,9 @@
-/* Записи голоса родителя. Источник истины — API (/voices);
-   когда сети или аккаунта нет, работает локальный IndexedDB-фолбэк. */
+/* Записи похвалы голосом родителя («Керемет!», «Жарайсың!» …).
+   Слова уроков озвучивает автор — их семья не записывает.
+   Источник истины — API (/voices); без сети работает локальный IndexedDB-фолбэк. */
 
 import { api, hasSession, isOnline } from "./api.js";
-import { state, allTopics, setSetting } from "./state.js";
+import { state, setSetting } from "./state.js";
 
 /* key -> {key, wav?(base64), url?, dur, at} */
 export const VOICES = new Map();
@@ -19,12 +20,7 @@ export const PHRASE_KEYS = [
   "p:your_turn", "p:great", "p:good", "p:almost",
   "p:again", "p:silent", "p:mic_intro", "p:done"
 ];
-export function voiceKeys(){
-  const set = new Set();
-  allTopics().forEach(t => t.words.forEach(w => set.add("w:" + w[0])));
-  PHRASE_KEYS.forEach(k => set.add(k));
-  return [...set];
-}
+export const voiceKeys = () => PHRASE_KEYS.slice();
 export const recordedCount = keys => keys.filter(k => VOICES.has(k)).length;
 export const getVoice = key => VOICES.get(key) || null;
 
@@ -54,7 +50,7 @@ async function ensureIDB(){
 export async function initVoices(){
   const local = await ensureIDB();
   if (local){
-    try { (await idb("readonly", s => s.getAll())).forEach(v => VOICES.set(v.key, v)); } catch {}
+    try { (await idb("readonly", s => s.getAll())).forEach(v => { if (v && String(v.key).startsWith("p:")) VOICES.set(v.key, v); }); } catch {}
     voiceStore.kind = "idb";
   } else {
     voiceStore.kind = "memory";
@@ -71,7 +67,7 @@ export async function syncVoices(){
     if (!Array.isArray(list)) return false;
     const seen = new Set();
     list.forEach(v => {
-      if (!v || typeof v.key !== "string") return;
+      if (!v || typeof v.key !== "string" || !v.key.startsWith("p:")) return;
       seen.add(v.key);
       const prev = VOICES.get(v.key);
       VOICES.set(v.key, {

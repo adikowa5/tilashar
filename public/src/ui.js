@@ -33,6 +33,7 @@ const TINT = { animals:"--t-animals", fruits:"--t-fruits", colors:"--t-colors", 
 export const tintOf = topic => `var(${TINT[topic && topic.id] || "--t-custom"})`;
 
 export function picHTML(w){
+  if (w && w.img) return `<img class="wpic" src="${esc(w.img)}" alt="" loading="lazy" decoding="async">`;
   const p = String(w[1] || "");
   if (/^#[0-9a-f]{6}$/i.test(p)) return `<span class="swatch" style="--sw:${p}"></span>`;
   if (/^\d{1,2}$/.test(p)) return `<span class="numpic"><span class="numeral">${p}</span><span class="asyks" style="--asz:${p<=2?46:p<=4?32:p<=6?24:18}%">${ICON.asyk.repeat(+p)}</span></span>`;
@@ -40,6 +41,7 @@ export function picHTML(w){
   return `<span class="emoji" aria-hidden="true">${esc(p)}</span>`;
 }
 export function topicPic(topic){
+  if (topic && topic.img) return `<img class="wpic" src="${esc(topic.img)}" alt="" loading="lazy" decoding="async">`;
   const key = ILL_TOPIC[topic.id];
   if (key && ILL[key]) return illSVG(key);
   if (topic.pic === "@colors") return `<span class="trio"><i style="background:#E0332B"></i><i style="background:#F5C518"></i><i style="background:#2F6FD6"></i></span>`;

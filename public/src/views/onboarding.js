@@ -1,30 +1,43 @@
-/* Вход: телефон → код → имя ребёнка и возраст.
-   Плюс «попробовать без регистрации» — гостевая семья (POST /auth/guest). */
+/* Первый запуск без регистрации.
+   «Бастау» — новая семья на этом устройстве (POST /auth/guest).
+   «Отбасы коды» — подключить это устройство к уже существующей семье (POST /auth/join).
+   Ссылка вида /?join=ABCD-2345 сразу открывает ввод кода. */
 
 import { navigate, viewEl, goAfterAuth } from "../main.js";
 import { api, hasSession, ApiError } from "../api.js";
-import { state, syncMe, syncTopics, setActiveChild, patch } from "../state.js";
+import { state, syncMe, syncTopics, syncProgress, setActiveChild, patch } from "../state.js";
+import { syncVoices } from "../voices.js";
 import { t } from "../i18n.js";
 import { ICON, $, esc, AVATARS, avatarHTML } from "../ui.js";
 
-let form = { step: "phone", phone: "", dev: null };
-
-const cleanPhone = s => String(s || "").replace(/[\s()-]/g, "");
-const phoneOk = s => /^\+?\d{10,15}$/.test(cleanPhone(s));
+let form = { step: "start", code: "" };
 
 const ERR = {
-  phone_invalid: "err_phone_invalid", code_invalid: "err_code_invalid", code_expired: "err_code_expired",
-  code_not_found: "err_code_not_found", too_many_attempts: "err_too_many", already_claimed: "err_already_claimed",
+  code_invalid: "err_code_invalid", too_many_attempts: "err_too_many",
   age_out_of_range: "err_age_range", too_many_children: "err_too_many_children", offline: "err_network"
 };
 const errText = e => t(ERR[e && e.code] || "err_save");
 
+/* Код из ссылки-приглашения (?join=…) — читаем один раз и убираем из адреса. */
+function codeFromLink(){
+  try {
+    const url = new URL(location.href);
+    const code = url.searchParams.get("join");
+    if (!code) return "";
+    url.searchParams.delete("join");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+    return code;
+  } catch { return ""; }
+}
+
 export function render(params){
   if (params && params.step) form.step = params.step;
-  if (!hasSession() && form.step === "child") form.step = "phone";
+  const linkCode = codeFromLink();
+  if (linkCode){ form.code = linkCode; form.step = "join"; }
+  if (!hasSession() && form.step === "child") form.step = "start";
   if (form.step === "child") return renderChild();
-  if (form.step === "code") return renderCode();
-  renderPhone();
+  if (form.step === "join") return renderJoin();
+  renderStart();
 }
 
 function shell(inner){
@@ -37,41 +50,24 @@ function shell(inner){
   </section>`;
 }
 
-/* ---------- шаг 1: телефон ---------- */
-function renderPhone(){
+/* ---------- первый экран ---------- */
+function renderStart(){
   shell(`
     <h1>${t("app_title")}</h1>
-    <h2>${t("ob_phone_head")}</h2>
-    <p class="note">${t("ob_phone_note")}</p>
-    <form class="ai-form" id="f">
-      <div class="ai-row">
-        <label class="sr" for="phone">${t("ob_phone_label")}</label>
-        <input id="phone" inputmode="tel" autocomplete="tel" value="${esc(form.phone)}" placeholder="${t("ob_phone_ph")}">
-        <button class="btn primary" id="send" type="submit">${t("ob_send_code")}${ICON.arrow}</button>
-      </div>
-      <p class="status" id="st"></p>
-    </form>
+    <h2>${t("ob_start_head")}</h2>
+    <p class="note">${t("ob_start_note")}</p>
+    <div class="ai-row">
+      <button class="btn primary big" id="start" type="button">${t("ob_start_btn")}${ICON.arrow}</button>
+    </div>
+    <p class="status" id="st"></p>
     <div class="gate-foot">
-      <button class="btn" id="guest" type="button">${t("ob_guest")}</button>
-      <p class="note">${t("ob_guest_note")}</p>
+      <button class="btn ghost" id="toJoin" type="button">${t("ob_have_code")}</button>
+      <p class="note">${t("ob_have_code_note")}</p>
     </div>`);
 
-  const input = $("#phone"), st = $("#st"), send = $("#send");
-  $("#f").onsubmit = async e => {
-    e.preventDefault();
-    const num = cleanPhone(input.value);
-    if (!phoneOk(num)){ st.textContent = t("err_phone_invalid"); input.focus(); return; }
-    send.disabled = true; st.textContent = "";
-    try {
-      const out = await api.sendCode(num);
-      form.phone = num;
-      form.dev = out && out.dev_code ? out.dev_code : null;
-      form.step = "code";
-      renderCode();
-    } catch (err){ st.textContent = errText(err); send.disabled = false; }
-  };
-  $("#guest").onclick = async () => {
-    const btn = $("#guest"); btn.disabled = true; st.textContent = "";
+  const st = $("#st");
+  $("#start").onclick = async () => {
+    const btn = $("#start"); btn.disabled = true; st.textContent = "";
     try {
       await api.guest();
       await syncMe();
@@ -80,44 +76,51 @@ function renderPhone(){
       form.step = "child";
       renderChild();
     } catch (err){
-      // Без сервера гость всё равно должен попасть в урок — работаем на встроенном контенте.
+      // Без сервера ребёнок всё равно попадает в урок — на встроенном материале.
       st.textContent = errText(err);
       btn.disabled = false;
       patch({ guest: true });
       navigate("today");
     }
   };
+  $("#toJoin").onclick = () => { form.step = "join"; renderJoin(); };
 }
 
-/* ---------- шаг 2: код ---------- */
-function renderCode(){
+/* ---------- подключение по коду семьи ---------- */
+function renderJoin(){
   shell(`
-    <h2>${t("ob_code_head")}</h2>
-    <p class="note">${esc(t("ob_code_note", { phone: form.phone }))}</p>
+    <h2>${t("ob_join_head")}</h2>
+    <p class="note">${t("ob_join_note")}</p>
     <form class="ai-form" id="f">
       <div class="ai-row">
-        <label class="sr" for="code">${t("ob_code_label")}</label>
-        <input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="${t("ob_code_ph")}">
-        <button class="btn primary" id="ok" type="submit">${t("ob_confirm")}${ICON.arrow}</button>
+        <label class="sr" for="code">${t("ob_join_label")}</label>
+        <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12"
+               value="${esc(form.code)}" placeholder="ABCD-2345" class="code-input">
+        <button class="btn primary" id="ok" type="submit">${t("ob_join_btn")}${ICON.arrow}</button>
       </div>
-      <p class="status" id="st">${form.dev ? esc(t("ob_dev_code", { code: form.dev })) : ""}</p>
+      <p class="status" id="st"></p>
     </form>
     <div class="gate-foot">
       <button class="btn ghost small" id="back" type="button">${ICON.back}${t("back")}</button>
-      <button class="btn ghost small" id="resend" type="button">${t("ob_resend")}</button>
     </div>`);
 
   const code = $("#code"), st = $("#st"), ok = $("#ok");
-  code.focus();
+  if (!form.code) code.focus();
   $("#f").onsubmit = async e => {
     e.preventDefault();
-    ok.disabled = true;
+    const value = code.value.trim();
+    if (!value){ code.focus(); return; }
+    ok.disabled = true; st.textContent = "";
     try {
-      await api.token(form.phone, code.value.trim());
+      await api.join(value);
+      form.code = "";
+      // Данные прежней семьи этого устройства (если была) больше не наши.
+      patch({ progress: {}, bestStars: {}, today: null, activeChildId: null, children: [] });
       await syncMe();
-      syncTopics();
+      await Promise.all([syncTopics(), syncProgress(), syncVoices()]);
+      patch({ guest: false });
       if (state.children.length){
-        setActiveChild(state.children[0].id);
+        setActiveChild(state.activeChildId || state.children[0].id);
         goAfterAuth();
       } else {
         form.step = "child";
@@ -125,11 +128,7 @@ function renderCode(){
       }
     } catch (err){ st.textContent = errText(err); ok.disabled = false; }
   };
-  $("#back").onclick = () => { form.step = "phone"; renderPhone(); };
-  $("#resend").onclick = async () => {
-    try { const out = await api.sendCode(form.phone); st.textContent = out && out.dev_code ? t("ob_dev_code", { code: out.dev_code }) : ""; }
-    catch (err){ st.textContent = errText(err); }
-  };
+  $("#back").onclick = () => { form.step = "start"; renderStart(); };
 }
 
 /* ---------- шаг 3: ребёнок ---------- */
@@ -199,7 +198,7 @@ function renderChild(){
       state.children = [...state.children, created];
       setActiveChild(created.id);
     }
-    form.step = "phone";
+    form.step = "start";
     navigate("today");
   });
 }

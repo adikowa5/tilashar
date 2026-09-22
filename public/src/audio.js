@@ -1,8 +1,10 @@
-/* Движок воспроизведения — перенесён из прототипа без изменений логики.
-   Один живой AudioContext: устройство вывода не засыпает, и первый слог клипа не глотается. */
+/* Движок воспроизведения.
+   Один живой AudioContext: устройство вывода не засыпает, и первый слог клипа не глотается.
+   Откуда звук: похвала — голос родителя, если записан; иначе голос автора; иначе голос модели.
+   Файлы приходят по ссылкам /api/v1/media/…; service worker кладёт их в кеш для офлайна. */
 
-import { AUDIO } from "./audio-pack.js";
-import { getVoice, modelVoiceOn, VOICES } from "./voices.js";
+import { getVoice, modelVoiceOn } from "./voices.js";
+import { audioFor } from "./state.js";
 
 let ac = null, rafId = 0, playing = null, playToken = null;
 
@@ -40,13 +42,24 @@ export function speechBounds(buf){
 }
 
 const bufCache = new Map();
+const BUF_LIMIT = 80;          // держим в памяти не больше стольких раскодированных звуков
 
-/* Сначала запись родителя, затем модельный голос. */
 export function sourceFor(key){
-  const rec = getVoice(key);
+  const rec = key.startsWith("p:") ? getVoice(key) : null;
   if (rec && (rec.wav || rec.url)) return { id: key + "@" + rec.at, b64: rec.wav, url: rec.url };
-  if (modelVoiceOn() && AUDIO[key]) return { id: key + "@model", b64: AUDIO[key].split(",")[1] };
+  const a = audioFor(key);
+  if (a && a.url) return { id: a.url, url: a.url };
+  if (a && a.model && modelVoiceOn()) return { id: a.model, url: a.model };
   return null;
+}
+
+/* Заранее скачиваем и раскодируем звуки урока: первое нажатие звучит сразу,
+   а файлы оседают в кеше и работают без интернета. */
+export function warm(keys){
+  const list = keys.map(sourceFor).filter(Boolean);
+  let chain = Promise.resolve();
+  list.forEach(src => { chain = chain.then(() => getBuffer(src).catch(() => {})); });
+  return chain;
 }
 export const hasAudio = key => !!sourceFor(key);
 
@@ -61,6 +74,7 @@ function getBuffer(src){
     const p = bytesOf(src).then(bytes => audioCtx().decodeAudioData(bytes)).then(buf => ({ buf, ...speechBounds(buf) }));
     p.catch(() => bufCache.delete(src.id));
     bufCache.set(src.id, p);
+    if (bufCache.size > BUF_LIMIT) bufCache.delete(bufCache.keys().next().value);
   }
   return bufCache.get(src.id);
 }
@@ -108,6 +122,14 @@ async function playSource(src, token, onProgress){
   });
 }
 
+/* Файл по адресу (редактор автора). */
+export async function playUrl(url){
+  stopAudio();
+  const token = {}; playToken = token;
+  const done = await playSource({ id: url, url }, token);
+  return done === true;
+}
+
 /* Запись ребёнка (WAV в base64): «послушай, как ты сказал». */
 export async function playWav(b64, id){
   stopAudio();
@@ -123,7 +145,7 @@ export async function play(key, { onProgress } = {}){
   const done = await playSource(src, token, onProgress);
   if (done !== null) return done;
   if (playToken !== token) return false;
-  if (key.startsWith("w:") && modelVoiceOn() && !VOICES.has(key) && "speechSynthesis" in window){
+  if (key.startsWith("w:") && modelVoiceOn() && "speechSynthesis" in window){
     return new Promise(resolve => {
       const u = new SpeechSynthesisUtterance(key.slice(2));
       const v = pickVoice();
@@ -139,4 +161,3 @@ export async function play(key, { onProgress } = {}){
   return false;
 }
 
-export { AUDIO };

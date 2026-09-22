@@ -1,28 +1,32 @@
-# Tilashar API v1 — контракт этапа 1
+# Tilashar API v1 — контракт
 
 Базовый путь: `/api/v1`. Формат — JSON, UTF-8. Все идентификаторы — UUID-строки.
 Ошибки: `{"detail": "<code>"}` + HTTP-код. Коды ошибок ниже перечислены явно.
 
-## Аутентификация
+## Вход без регистрации
 
-JWT: access (30 мин) и refresh (30 дней) в теле ответа, клиент хранит их сам.
+Семья не регистрируется. Первое устройство создаёт семью (`/auth/guest`), остальные подключаются
+по коду семьи (`/auth/join`). Телефонов, почты и паролей у семей нет.
+
+JWT: access (30 мин) и refresh (400 дней, продлевается при каждом обновлении) в теле ответа.
 Заголовок: `Authorization: Bearer <access>`.
 
 | Метод | Путь | Тело | Ответ |
 |---|---|---|---|
-| POST | `/auth/code` | `{"phone": "+77011234567"}` | `{"sent": true, "dev_code": "000000"\|null, "retry_after": 60}` |
-| POST | `/auth/token` | `{"phone": "...", "code": "123456"}` | `TokenPair` |
+| POST | `/auth/guest` | — | `TokenPair` — новая семья на этом устройстве |
+| POST | `/auth/join` | `{"code": "ABCD-2345"}` | `TokenPair` — устройство в существующей семье |
+| GET | `/family/code` | — | `{"code": "ABCD-2345"}` — создаётся при первом запросе |
+| POST | `/family/code` | — | `{"code": "..."}` — новый код, старый перестаёт работать |
 | POST | `/auth/refresh` | `{"refresh_token": "..."}` | `TokenPair` |
-| POST | `/auth/guest` | — | `TokenPair` (создаёт гостевую семью) |
-| POST | `/auth/claim` | `{"phone": "...", "code": "..."}` | `TokenPair` — превращает гостевую семью в обычную, сохраняя детей и прогресс |
 | POST | `/auth/logout` | `{"refresh_token": "..."}` | `204` |
 
 `TokenPair` = `{"access_token": str, "refresh_token": str, "token_type": "bearer", "expires_in": 1800}`
 
-Коды ошибок: `code_not_found`, `code_expired`, `code_invalid`, `too_many_attempts`, `phone_invalid`, `token_invalid`, `already_claimed`.
+Код семьи — 8 символов без похожих (`0/O`, `1/I/L`); регистр, пробелы и дефис при вводе не важны.
+Ссылка-приглашение: `https://<сайт>/?join=<код>`.
 
-В dev-режиме (`SMS_PROVIDER=console`) код всегда `000000` и возвращается в `dev_code`.
-Лимит: 5 запросов кода на телефон в час, 5 попыток ввода на код.
+Ограничения на IP: `GUEST_PER_HOUR` (20) новых семей в час, `JOIN_ATTEMPTS_PER_HOUR` (12) неверных кодов в час.
+Коды ошибок: `code_invalid` (404), `too_many_attempts` (429), `token_invalid` (401).
 
 ## Я и семья
 
@@ -50,14 +54,47 @@ JWT: access (30 мин) и refresh (30 дней) в теле ответа, кл�
 
 | Метод | Путь | Ответ |
 |---|---|---|
-| GET | `/content/topics` | `[Topic]` — встроенные темы + темы семьи |
-| GET | `/content/topics/{slug}` | `Topic` с полем `words` |
-| POST | `/content/topics` | своя тема (из AI-генерации): `{"title_kk","title_ru","pic","words":[Word]}` |
+| GET | `/content/catalog` | весь опубликованный материал одним ответом, **без токена**; `ETag` = версия |
+| GET | `/media/{sha256}.{ext}` | файл (голос или картинка), без токена, кешируется навсегда |
+| GET | `/content/topics`, `/content/topics/{slug}` | старый формат по темам (оставлен для совместимости) |
 
-`Topic` = `{"id","slug","title_kk","title_ru","pic","kind":"builtin"|"family","word_count"}`
-`Word` = `{"id","text_kk","text_ru","syllables","pic","audio_key"}`
+```
+Catalog = {"version", "topics": [CTopic], "phrases": [CPhrase]}
+CTopic  = {"id","slug","title_kk","title_ru","pic","image_url","is_published","order_index","words":[CWord]}
+CWord   = {"id","text_kk","text_ru","syllables","pic","image_url","audio_url","model_audio_url"}
+CPhrase = {"key","text_kk","text_ru","audio_url","model_audio_url"}
+```
 
-`audio_key` — ключ записи в паке озвучки (`w:алма`); фронт сам решает, брать ли запись родителя.
+Какой голос звучит: для слова — `audio_url` (автор), иначе `model_audio_url` (модель), иначе синтез браузера.
+Для фразы похвалы — запись семьи (`/voices`), иначе автор, иначе модель.
+`pic` — эмодзи, цвет `#RRGGBB` или цифра; показывается, если нет `image_url`.
+
+## Редактор автора
+
+Вход по паролю `ADMIN_PASSWORD`. Токен автора — в заголовке `X-Admin-Token`, живёт `ADMIN_TTL_HOURS` (12).
+Смена пароля делает старые токены недействительными. Пустой `ADMIN_PASSWORD` → `503 admin_disabled`.
+
+| Метод | Путь | Тело | Ответ |
+|---|---|---|---|
+| POST | `/admin/login` | `{"password"}` | `{"token","expires_in"}`; 10 неверных попыток в час с IP |
+| GET | `/admin/catalog` | — | `Catalog` вместе с неопубликованным |
+| GET | `/admin/stats` | — | семьи, активные за 7 дней, дети, попытки, слова с голосом, объём файлов |
+| POST | `/admin/topics` | `{"title_kk","title_ru","pic","is_published"}` | `CTopic` (по умолчанию черновик) |
+| PATCH | `/admin/topics/{id}` | любые из полей выше | `CTopic` |
+| DELETE | `/admin/topics/{id}` | — | `204` (слова и прогресс по ним удаляются) |
+| POST | `/admin/topics/order` | `{"ids": [...]}` | `Catalog` |
+| PUT / DELETE | `/admin/topics/{id}/image` | multipart `file` | `CTopic` |
+| POST | `/admin/topics/{id}/words` | `{"text_kk","text_ru","syllables","pic"}` | `CWord` |
+| POST | `/admin/topics/{id}/words/bulk` | `{"words": [...]}` (до 200, дубли пропускаются) | `CTopic` |
+| POST | `/admin/topics/{id}/words/order` | `{"ids": [...]}` | `CTopic` |
+| PATCH | `/admin/words/{id}` | поля слова, `topic_id` — перенос в другую категорию | `CWord` |
+| DELETE | `/admin/words/{id}` | — | `204` |
+| PUT / DELETE | `/admin/words/{id}/audio` | multipart `file` (WAV ≤ 2 МБ) | `CWord` |
+| PUT / DELETE | `/admin/words/{id}/image` | multipart `file` (PNG/JPG/WebP/GIF ≤ 1 МБ; SVG нельзя) | `CWord` |
+| PATCH | `/admin/phrases/{key}` | `{"text_kk","text_ru"}` | `CPhrase` |
+| PUT / DELETE | `/admin/phrases/{key}/audio` | multipart `file` | `CPhrase` |
+
+Тип файла проверяется по содержимому, а не по заголовку. Одинаковые файлы хранятся один раз.
 
 ## Урок дня
 
@@ -75,24 +112,26 @@ JWT: access (30 мин) и refresh (30 дней) в теле ответа, кл�
 
 Серия (`streak`): считается по дням, в которых ребёнок закрыл хотя бы один урок; пропуск одного дня серию не обнуляет («заморозка»), два подряд — обнуляет.
 
-## Голос родителя
+## Похвала голосом родителя
 
 | Метод | Путь | Тело | Ответ |
 |---|---|---|---|
 | GET | `/voices` | — | `[{"key","url","duration_ms","updated_at"}]` |
-| PUT | `/voices` | multipart: `key`, `file` (audio/wav, ≤2 МБ) | запись |
+| PUT | `/voices` | multipart: `key`, `file` (WAV, ≤2 МБ) | запись |
 | DELETE | `/voices/{key}` | — | `204` |
 
-Ключ — `w:<слово>` или `p:<фраза>`, проверяется по регулярке `^[wp]:.{1,64}$`.
-Файлы кладутся в `MEDIA_ROOT/<family_id>/<sha256>.wav`, отдаются по `/media/...`.
+Ключ — только фраза похвалы: `^p:[a-z_]{1,32}$` (`p:great`, `p:good` …). Слова уроков озвучивает автор.
+Файл лежит в БД и отдаётся по `/api/v1/voices/audio/<sha256>.wav` без токена.
 
 ## Прочее
 
-`GET /health` → `{"status":"ok","db":"ok"}`.
-`GET /api/v1/config` → `{"sms_provider","dev_mode","max_children","version"}`.
+`GET /health` → `{"status":"ok","db":"ok"}`; при ошибке базы — ещё `reason` (без логина и пароля).
+`GET /api/v1/config` → `{"max_children","version"}`.
+`GET /api/v1/internal/cleanup` — ежедневная уборка, только с заголовком `Authorization: Bearer <CRON_SECRET>`.
 
-## Правила авторизации
+## Правила авторизации и хранения
 
 * Любой `/children/{id}/...` проверяет, что ребёнок принадлежит семье вызывающего — иначе `404` (не `403`, чтобы не раскрывать существование).
-* Гостевая семья живёт 30 дней, потом чистится задачей; при `claim` привязывается к телефону.
+* Личных данных родителя нет. О ребёнке — имя (можно прозвище), возраст, аватар.
+* Уборка удаляет семьи без единой попытки через `INACTIVE_EMPTY_DAYS` (60) дней без визитов и любые семьи через `INACTIVE_DAYS` (400).
 * Голос ребёнка на сервере не хранится вообще: распознавание идёт в браузере, на сервер приходят только `stars` и распознанный текст.

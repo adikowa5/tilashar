@@ -4,10 +4,11 @@
    Код и стили — network-first с таймаутом: новый деплой виден со следующей загрузки,
    а без сети всё берётся из кеша. /api — network-first с кешем на GET. */
 
-const VERSION = "tilashar-v2";
+const VERSION = "tilashar-v3";
 const NET_TIMEOUT_MS = 3500;
 const SHELL = VERSION + "-shell";
 const RUNTIME = VERSION + "-runtime";
+const MEDIA = "tilashar-media";            // без версии: файлы по хешу не устаревают
 
 const PRECACHE = [
   "./",
@@ -28,7 +29,6 @@ const PRECACHE = [
   "./src/speech.js",
   "./src/ill.js",
   "./src/words.js",
-  "./src/audio-pack.js",
   "./src/views/onboarding.js",
   "./src/views/children.js",
   "./src/views/today.js",
@@ -36,7 +36,8 @@ const PRECACHE = [
   "./src/views/results.js",
   "./src/views/studio.js",
   "./src/views/parent.js",
-  "./src/views/mic.js"
+  "./src/views/mic.js",
+  "./src/views/author.js"
 ];
 
 self.addEventListener("install", e => {
@@ -51,12 +52,14 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== SHELL && k !== RUNTIME).map(k => caches.delete(k)));
+    await Promise.all(keys.filter(k => k !== SHELL && k !== RUNTIME && k !== MEDIA).map(k => caches.delete(k)));
     await self.clients.claim();
   })());
 });
 
 const isApi = url => url.pathname.startsWith("/api/");
+// Голос и картинки по хешу содержимого: адрес не меняется никогда — берём из кеша, сеть только в первый раз.
+const isFile = url => url.pathname.startsWith("/api/v1/media/") || url.pathname.startsWith("/api/v1/voices/audio/");
 const isMedia = url => url.pathname.startsWith("/media/");
 const isFont = url => url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
 
@@ -118,6 +121,7 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   const url = new URL(req.url);
 
+  if (req.method === "GET" && isFile(url)) return e.respondWith(cacheFirst(req, MEDIA));
   if (isApi(url)) return e.respondWith(networkFirst(req));
 
   if (req.mode === "navigate"){

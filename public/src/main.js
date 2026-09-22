@@ -16,8 +16,9 @@ import * as results from "./views/results.js";
 import * as studio from "./views/studio.js";
 import * as parent from "./views/parent.js";
 import * as mic from "./views/mic.js";
+import * as author from "./views/author.js";
 
-const VIEWS = { onboarding, children, today, lesson, results, studio, parent, mic };
+const VIEWS = { onboarding, children, today, lesson, results, studio, parent, mic, author };
 
 let gen = 0;
 let current = { name: null, params: {} };
@@ -80,7 +81,7 @@ function registerSW(){
   let reloaded = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!hadController || reloaded) return;
-    if (current.name === "lesson" || current.name === "studio" || current.name === "mic") return;
+    if (["lesson", "studio", "mic", "author"].includes(current.name)) return;
     reloaded = true;
     location.reload();
   });
@@ -94,17 +95,30 @@ async function boot(){
   registerSW();
   initVoices();
 
-  if (hasSession()){
+  // Каталог общий и без токена: подтягиваем всегда, даже до входа.
+  const topicsReady = syncTopics();
+  const wantsAuthor = location.hash === "#author";
+  const hasInvite = /[?&]join=/.test(location.search);
+
+  if (wantsAuthor){
+    navigate("author");
+  } else if (hasInvite){
+    navigate("onboarding", { step: "join" });
+  } else if (hasSession()){
     if (isOnline()){
       await syncMe();
       flushQueue();
-      syncTopics().then(syncProgress);
+      topicsReady.then(syncProgress);
     }
     goAfterAuth();
   } else {
     navigate("onboarding");
   }
   state.ready = true;
+
+  addEventListener("hashchange", () => {
+    if (location.hash === "#author" && current.name !== "author") navigate("author");
+  });
 }
 
 subscribe(() => {

@@ -127,11 +127,11 @@ if (typeof window !== "undefined"){
 
 /* ---------- методы контракта ---------- */
 export const api = {
-  /* auth */
-  sendCode:  phone        => request("/auth/code",   { method: "POST", body: { phone }, auth: false }),
-  token:     (phone, code) => request("/auth/token",  { method: "POST", body: { phone, code }, auth: false }).then(setTokens),
-  guest:     ()           => request("/auth/guest",  { method: "POST", auth: false }).then(setTokens),
-  claim:     (phone, code) => request("/auth/claim",  { method: "POST", body: { phone, code } }).then(setTokens),
+  /* вход без регистрации: новое устройство — гость, второе устройство — по коду семьи */
+  guest:      ()   => request("/auth/guest", { method: "POST", auth: false }).then(setTokens),
+  join:       code => request("/auth/join",  { method: "POST", body: { code }, auth: false }).then(setTokens),
+  familyCode: ()   => request("/family/code"),
+  newFamilyCode: () => request("/family/code", { method: "POST" }),
   logout:    async () => {
     const rt = tokens && tokens.refresh_token;
     try { if (rt) await request("/auth/logout", { method: "POST", body: { refresh_token: rt } }); } catch {}
@@ -149,7 +149,8 @@ export const api = {
   patchChild:  (id, patch)   => request("/children/" + encodeURIComponent(id), { method: "PATCH", body: patch }),
   removeChild: id            => request("/children/" + encodeURIComponent(id), { method: "DELETE" }),
 
-  /* контент */
+  /* контент: весь опубликованный материал одним запросом, без токена */
+  catalog:   ()     => request("/content/catalog", { auth: false }),
   topics:    ()     => request("/content/topics"),
   topic:     slug   => request("/content/topics/" + encodeURIComponent(slug)),
   addTopic:  topic  => request("/content/topics", { method: "POST", body: topic }),

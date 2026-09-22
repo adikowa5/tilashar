@@ -325,3 +325,52 @@ h3{margin:0}
 .mh-steps b{color:var(--ink);font-weight:900}
 .mic-help .tip{max-width:none}
 @media (max-width:720px){ .mic-help .studio-head{grid-template-columns:1fr;padding:20px} .mh-steps{padding:18px 18px} }
+
+/* ——— картинки автора вместо эмодзи ——— */
+.plate img.wpic,.tpic img.wpic{width:78%;height:78%;object-fit:contain;display:block}
+
+/* ——— код семьи ——— */
+.code-input{font-family:var(--display);letter-spacing:.14em;text-transform:uppercase}
+.code-band .code-side{display:grid;gap:10px;align-content:start}
+.family-code{margin:0;font-family:var(--display);font-weight:700;font-size:clamp(30px,6vw,42px);letter-spacing:.12em;font-variant-numeric:tabular-nums;color:var(--ink);user-select:all}
+
+/* ——— редактор автора ——— */
+.author{display:grid;gap:18px}
+.au-stats{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.au-stats div{padding:10px 12px;border-radius:18px;background:var(--surface-2);border:2px solid var(--hair)}
+.au-stats dt{font-size:13px;font-weight:800;color:var(--ink-soft)}
+.au-stats dd{margin:2px 0 0;font-family:var(--display);font-weight:700;font-size:22px;font-variant-numeric:tabular-nums}
+.au-draft{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:var(--berry);margin-right:6px}
+.tabs .au-add{display:inline-flex;align-items:center;gap:6px}
+.tabs .au-add svg{width:16px;height:16px}
+.au-panel{padding:20px 22px;display:grid;gap:14px}
+.au-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:end}
+.au-grid label{display:grid;gap:6px;font-weight:800;font-size:15px;color:var(--ink-soft)}
+.au-grid input,.au-fields input,.au-bulk textarea{font:inherit;font-weight:700;font-size:17px;color:var(--ink);background:var(--surface);border:2px solid var(--line);border-radius:14px;padding:8px 12px;min-width:0}
+.au-grid input:focus-visible,.au-fields input:focus-visible,.au-bulk textarea:focus-visible{outline:3px solid var(--focus);outline-offset:1px}
+.au-grid .switch{align-self:center}
+.au-row-actions{display:flex;gap:10px}
+.au-topic-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.au-spacer{flex:1}
+.au-plate{--plate:58px;border-width:2px;font-size:28px}
+.au-danger{color:var(--berry)}
+.au-words{gap:10px;grid-template-columns:1fr}
+.au-row{grid-template-columns:auto minmax(0,1fr);align-items:start}
+.au-row .rec-actions{grid-column:1/-1;flex-wrap:wrap}
+.au-fields{display:grid;grid-template-columns:minmax(120px,1.3fr) minmax(110px,1fr) minmax(110px,1fr) 64px;gap:8px;align-items:center}
+.au-fields .au-word{font-size:20px;font-weight:900}
+.au-fields .au-emoji{text-align:center}
+.au-voice{grid-column:1/-1;font-size:14px;font-weight:800;color:var(--ink-soft)}
+.au-row.has .au-voice{color:var(--good)}
+.au-row .rec-btn{position:relative}
+.au-row.recording .rec-btn{box-shadow:0 0 0 calc(var(--lvl,0) * 14px) color-mix(in srgb, var(--berry) 30%, transparent)}
+.au-bulk{display:grid;gap:10px}
+.au-bulk summary{cursor:pointer;font-weight:900}
+.au-bulk textarea{width:100%;box-sizing:border-box;resize:vertical}
+.au-status{position:sticky;bottom:12px;justify-self:center;background:var(--surface);border:2px solid var(--line);border-radius:999px;padding:8px 18px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.au-status:empty{display:none}
+@media (max-width:720px){
+  .au-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .au-fields{grid-template-columns:1fr 1fr}
+  .au-fields .au-word{grid-column:1/-1}
+}
