@@ -37,6 +37,9 @@ class Settings(BaseSettings):
 
     max_children: int = 4
 
+    # Ключ Pexels для поиска фотографий в редакторе. Пусто — поиск выключен.
+    pexels_api_key: str = ""
+
     # Пароль автора (страница #author). Пусто — редактор выключен.
     admin_password: str = ""
     admin_ttl_hours: int = 12

@@ -123,6 +123,9 @@ class Media(Base):
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Откуда картинка: «Фото: Айгүл Н. / Pexels» и ссылка на страницу автора.
+    credit: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    source_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 

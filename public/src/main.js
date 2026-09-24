@@ -63,7 +63,7 @@ export function goAfterAuth(){
 function paintChrome(){
   const f = document.getElementById("foot");
   if (f){
-    f.innerHTML = `<span>${t("foot_model")}</span><button class="linkish" id="footMic" type="button">${t("foot_mic")}</button>`;
+    f.innerHTML = `<span>${t("foot_model")}</span><a href="https://www.pexels.com" target="_blank" rel="noopener">${t("foot_photos")}</a><button class="linkish" id="footMic" type="button">${t("foot_mic")}</button>`;
     f.querySelector("#footMic").onclick = openMicHelp;
   }
   document.title = t("app_title");

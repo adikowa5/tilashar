@@ -17,6 +17,8 @@ from app.catalog import build_catalog, phrase_out, topic_out, word_out
 from app.config import settings
 from app.deps import get_db
 from app.media import MAX_AUDIO_BYTES, MAX_IMAGE_BYTES, read_upload, store
+from app.photos import fetch as fetch_photo
+from app.photos import search as search_photos
 from app.models import Attempt, Child, Family, Media, Phrase, Topic, Word, utcnow
 from app.routers.content import audio_key_for, slugify
 from app.schemas import (
@@ -34,6 +36,8 @@ from app.schemas import (
     CatalogPhrase,
     CatalogTopic,
     CatalogWord,
+    PhotoOut,
+    PhotoPick,
 )
 from app.security import check_admin_password, create_admin_token, verify_admin_token
 
@@ -290,6 +294,31 @@ def delete_word_audio(word_id: str, db: Session = Depends(get_db)) -> CatalogWor
     word.audio_id = None
     word.updated_at = utcnow()
     return _fresh_word(db, word)
+
+
+@router.get("/photos", response_model=list[PhotoOut], dependencies=[Depends(require_admin)])
+def find_photos(q: str, per_page: int = 24) -> list[PhotoOut]:
+    """Поиск фотографий на Pexels. Ключ PEXELS_API_KEY не покидает сервер."""
+    return search_photos(q, max(1, min(per_page, 40)))
+
+
+@router.post("/words/{word_id}/image/pexels", response_model=CatalogWord, dependencies=[Depends(require_admin)])
+def put_word_photo(word_id: str, payload: PhotoPick, db: Session = Depends(get_db)) -> CatalogWord:
+    """Ставит слову выбранную фотографию вместе с подписью автора."""
+    word = _word(db, word_id)
+    data, credit, source = fetch_photo(payload.photo_id)
+    word.image_id = store(db, data, "image", credit=credit, source_url=source).id
+    word.updated_at = utcnow()
+    return _fresh_word(db, word)
+
+
+@router.post("/topics/{topic_id}/image/pexels", response_model=CatalogTopic, dependencies=[Depends(require_admin)])
+def put_topic_photo(topic_id: str, payload: PhotoPick, db: Session = Depends(get_db)) -> CatalogTopic:
+    topic = _topic(db, topic_id)
+    data, credit, source = fetch_photo(payload.photo_id)
+    topic.image_id = store(db, data, "image", credit=credit, source_url=source).id
+    topic.updated_at = utcnow()
+    return _fresh_topic(db, topic)
 
 
 @router.put("/words/{word_id}/image", response_model=CatalogWord, dependencies=[Depends(require_admin)])

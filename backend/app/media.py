@@ -60,7 +60,7 @@ def read_upload(file: UploadFile, limit: int) -> bytes:
     return data
 
 
-def store(db: Session, data: bytes, kind: str) -> Media:
+def store(db: Session, data: bytes, kind: str, credit: str = "", source_url: str = "") -> Media:
     """Сохраняет файл (или возвращает уже сохранённый с тем же содержимым)."""
     sniffed = sniff_image(data) if kind == "image" else sniff_audio(data)
     if sniffed is None:
@@ -71,6 +71,8 @@ def store(db: Session, data: bytes, kind: str) -> Media:
     digest = hashlib.sha256(data).hexdigest()
     existing = db.execute(select(Media).where(Media.sha256 == digest)).scalar_one_or_none()
     if existing is not None:
+        if credit and not existing.credit:
+            existing.credit, existing.source_url = credit, source_url
         return existing
     media = Media(
         sha256=digest,
@@ -80,6 +82,8 @@ def store(db: Session, data: bytes, kind: str) -> Media:
         data=data,
         size_bytes=len(data),
         duration_ms=wav_duration_ms(data) if ext == "wav" else 0,
+        credit=credit,
+        source_url=source_url,
     )
     db.add(media)
     db.flush()

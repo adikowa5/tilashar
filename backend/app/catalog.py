@@ -23,6 +23,7 @@ def word_out(word: Word) -> CatalogWord:
         syllables=word.syllables or word.text_kk,
         pic=word.pic,
         image_url=url_of(word.image),
+        image_credit=word.image.credit if word.image is not None else None,
         audio_url=url_of(word.audio),
         model_audio_url=url_of(word.model_audio),
     )
@@ -36,6 +37,7 @@ def topic_out(topic: Topic) -> CatalogTopic:
         title_ru=topic.title_ru,
         pic=topic.pic,
         image_url=url_of(topic.image),
+        image_credit=topic.image.credit if topic.image is not None else None,
         is_published=topic.is_published,
         order_index=topic.order_index,
         words=[word_out(w) for w in topic.words],

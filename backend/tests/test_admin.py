@@ -190,3 +190,36 @@ def test_cleanup_removes_abandoned_families(client: TestClient, db: Session, hea
     monkeypatch.setattr(settings, "cron_secret", "s3cret")
     assert client.get(f"{API}/internal/cleanup").status_code == 401
     assert client.get(f"{API}/internal/cleanup", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+def test_photo_search_needs_key(client: TestClient, admin: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "pexels_api_key", "")
+    response = client.get(f"{API}/admin/photos", params={"q": "кошка"}, headers=admin)
+    assert response.status_code == 503
+    assert response.json()["detail"] == "photos_disabled"
+
+
+def test_photo_search_and_attach(client: TestClient, admin: dict, content: dict,
+                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.routers import admin as admin_router
+    from app.schemas import PhotoOut
+
+    monkeypatch.setattr(settings, "pexels_api_key", "test-key")
+    monkeypatch.setattr(
+        admin_router, "search_photos",
+        lambda q, per_page=24: [PhotoOut(id=77, thumb="https://x/t.jpg", alt=q, photographer="Айгүл", page_url="https://p/77")],
+    )
+    found = client.get(f"{API}/admin/photos", params={"q": "мысық"}, headers=admin)
+    assert found.status_code == 200
+    assert found.json()[0]["photographer"] == "Айгүл"
+
+    monkeypatch.setattr(admin_router, "fetch_photo", lambda pid: (png(), "Фото: Айгүл / Pexels", "https://p/77"))
+    word_id = content["alpha"][0]
+    out = client.post(f"{API}/admin/words/{word_id}/image/pexels", json={"photo_id": 77}, headers=admin)
+    assert out.status_code == 200, out.text
+    assert out.json()["image_credit"] == "Фото: Айгүл / Pexels"
+
+    public = client.get(f"{API}/content/catalog").json()
+    word = next(w for t in public["topics"] for w in t["words"] if w["id"] == word_id)
+    assert word["image_credit"] == "Фото: Айгүл / Pexels"
+    assert client.get(word["image_url"]).status_code == 200

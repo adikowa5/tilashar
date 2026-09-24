@@ -51,7 +51,8 @@ const upload = (path, blob, name) => { const fd = new FormData(); fd.append("fil
 const ERR = {
   offline: "err_network", password_invalid: "au_err_password", too_many_attempts: "err_too_many",
   admin_disabled: "au_err_disabled", admin_token_invalid: "au_err_session", file_too_large: "au_err_big",
-  unsupported_media_type: "au_err_type", quiet: "err_quiet", decode: "err_decode"
+  unsupported_media_type: "au_err_type", quiet: "err_quiet", decode: "err_decode",
+  photos_disabled: "au_photo_off", photos_unavailable: "au_photo_err", photo_not_found: "au_photo_err"
 };
 const errText = e => t(ERR[e && e.code] || (e && e.name === "NotAllowedError" ? "err_mic_denied" : "err_save"));
 
@@ -224,6 +225,7 @@ function paintTopic(tp){
     </form>
     <div class="au-topic-bar">
       <span class="plate au-plate">${tp.image_url ? `<img class="wpic" src="${esc(tp.image_url)}" alt="">` : `<span class="emoji">${esc(tp.pic || "·")}</span>`}</span>
+      <button class="btn small" id="tPhoto" type="button">${t("au_photo")}</button>
       <label class="btn small" for="tImg"><input class="sr" type="file" accept="image/*" id="tImg">${t("au_image")}</label>
       ${tp.image_url ? `<button class="btn ghost small" id="tImgDel" type="button">${t("au_image_del")}</button>` : ""}
       <span class="au-spacer"></span>
@@ -276,6 +278,8 @@ function paintTopic(tp){
     [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
     try { cat = await call("/admin/topics/order", { method: "POST", body: { ids } }); touch(); paint(); } catch (err){ status(errText(err)); }
   };
+  $("#tPhoto").onclick = () => photoPanel($("#tPhoto").closest("section"), { text_ru: tp.title_ru, text_kk: tp.title_kk },
+    out => { replaceTopic(out); touch(); paint(); }, "/admin/topics/" + tp.id + "/image/pexels");
   $("#tUp").onclick = () => moveTopic(-1);
   $("#tDown").onclick = () => moveTopic(1);
   $("#tDel").onclick = async () => {
@@ -311,13 +315,14 @@ function wordRow(w, i, n){
       <input data-f="syllables" value="${esc(w.syllables)}" aria-label="${t("au_syll")}" lang="kk">
       <input data-f="text_ru" value="${esc(w.text_ru)}" aria-label="${t("au_ru")}" placeholder="${t("au_ru")}">
       <input data-f="pic" value="${esc(w.pic)}" aria-label="${t("au_emoji")}" class="au-emoji">
-      <small class="au-voice">${voiceState(w)}</small>
+      <small class="au-voice">${voiceState(w)}${w.image_credit ? " · " + esc(w.image_credit) : ""}</small>
     </span>
     <span class="rec-actions">
       <button class="btn rec-btn" type="button" data-act="rec">${ICON.mic}${w.audio_url ? t("au_rerecord") : t("rec_btn")}</button>
       <button class="icon-btn" type="button" data-act="play" aria-label="${t("btn_listen")}" ${w.audio_url || w.model_audio_url ? "" : "disabled"}>${ICON.play}</button>
       <label class="icon-btn" title="${t("rec_file_title")}"><input class="sr" type="file" accept="audio/*" data-act="afile">${ICON.upload}</label>
       <button class="icon-btn" type="button" data-act="adel" aria-label="${t("au_voice_del")}" title="${t("au_voice_del")}" ${w.audio_url ? "" : "disabled"}>${ICON.trash}</button>
+      <button class="btn small" type="button" data-act="photo">${t("au_photo")}</button>
       <label class="btn small" title="${t("au_image")}"><input class="sr" type="file" accept="image/*" data-act="img">${t("au_image")}</label>
       ${w.image_url ? `<button class="btn ghost small" type="button" data-act="imgdel">${t("au_image_del")}</button>` : ""}
       <button class="icon-btn" type="button" data-act="up" aria-label="↑" ${i === 0 ? "disabled" : ""}>↑</button>
@@ -351,6 +356,7 @@ function wireWordRow(tp, row){
     catch (err){ status(errText(err)); }
   };
   if (q("imgdel")) q("imgdel").onclick = async () => { try { refresh(await call("/admin/words/" + id + "/image", { method: "DELETE" })); } catch (err){ status(errText(err)); } };
+  q("photo").onclick = () => photoPanel(row, w(), out => refresh(out), "/admin/words/" + id + "/image/pexels");
   const move = async d => {
     const ids = tp.words.map(x => x.id); const i = ids.indexOf(id);
     [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
@@ -407,6 +413,59 @@ function paintPhrases(){
     };
     q("adel").onclick = async () => { try { refresh(await call(path + "/audio", { method: "DELETE" })); } catch (err){ status(errText(err)); } };
   });
+}
+
+/* ---------- поиск фотографии ----------
+   Ключ Pexels живёт на сервере: клиент отправляет только слово и номер выбранного снимка. */
+async function photoPanel(host, item, onPicked, pickPath){
+  const old = host.querySelector(".au-photos");
+  if (old){ old.remove(); return; }
+  const box = document.createElement("div");
+  box.className = "au-photos";
+  box.innerHTML = `
+    <div class="ai-row">
+      <input class="au-q" aria-label="${t("au_photo_search")}" placeholder="${t("au_photo_search")}">
+      <button class="btn small" type="button" data-go="1">${t("au_photo_find")}</button>
+      <button class="btn small ghost" type="button" data-close="1">${t("au_photo_close")}</button>
+    </div>
+    <p class="note au-photo-note">${t("au_photo_hint")}</p>
+    <div class="au-grid-photos"></div>`;
+  host.appendChild(box);
+  const input = box.querySelector(".au-q");
+  const grid = box.querySelector(".au-grid-photos");
+  const note = box.querySelector(".au-photo-note");
+  input.value = (item.text_ru || item.text_kk || "").trim();
+  input.focus();
+
+  const find = async () => {
+    const q = input.value.trim();
+    if (!q) return;
+    note.textContent = t("au_photo_looking");
+    grid.innerHTML = "";
+    let list = [];
+    try { list = await call("/admin/photos?q=" + encodeURIComponent(q)); }
+    catch (err){ note.textContent = errText(err); return; }
+    if (!list.length){ note.textContent = t("au_photo_none"); return; }
+    note.textContent = t("au_photo_pick");
+    grid.innerHTML = list.map(p => `
+      <button class="au-photo" type="button" data-id="${p.id}" title="${esc(p.photographer)}">
+        <img src="${esc(p.thumb)}" alt="${esc(p.alt)}" loading="lazy">
+        <small>${esc(p.photographer)}</small>
+      </button>`).join("");
+    grid.querySelectorAll(".au-photo").forEach(btn => btn.onclick = async () => {
+      note.textContent = t("au_uploading");
+      try {
+        const out = await call(pickPath, { method: "POST", body: { photo_id: +btn.dataset.id } });
+        box.remove();
+        onPicked(out);
+        status(t("au_saved"));
+      } catch (err){ note.textContent = errText(err); }
+    });
+  };
+  box.querySelector("[data-go]").onclick = find;
+  box.querySelector("[data-close]").onclick = () => box.remove();
+  input.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); find(); } };
+  find();
 }
 
 /* ---------- запись голоса ---------- */

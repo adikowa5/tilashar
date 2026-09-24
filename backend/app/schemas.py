@@ -143,6 +143,7 @@ class CatalogWord(BaseModel):
     syllables: str
     pic: str
     image_url: str | None = None
+    image_credit: str | None = None
     audio_url: str | None = None
     model_audio_url: str | None = None
 
@@ -154,6 +155,7 @@ class CatalogTopic(BaseModel):
     title_ru: str
     pic: str
     image_url: str | None = None
+    image_credit: str | None = None
     is_published: bool = True
     order_index: int = 0
     words: list[CatalogWord]
@@ -225,6 +227,18 @@ class AdminOrderIn(BaseModel):
 class AdminPhrasePatch(BaseModel):
     text_kk: str | None = Field(default=None, min_length=1, max_length=128)
     text_ru: str | None = Field(default=None, max_length=128)
+
+
+class PhotoOut(BaseModel):
+    id: int
+    thumb: str
+    alt: str
+    photographer: str
+    page_url: str
+
+
+class PhotoPick(BaseModel):
+    photo_id: int = Field(gt=0)
 
 
 class AdminStatsOut(BaseModel):
