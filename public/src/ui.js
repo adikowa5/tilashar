@@ -1,12 +1,10 @@
 /* Иконки и мелкие помощники отрисовки — перенесены из прототипа. */
 
-import { ILL, ILL_TOPIC } from "./ill.js";
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-export const illSVG = key => `<svg class="ill" viewBox="0 0 100 100" aria-hidden="true">${ILL[key]}</svg>`;
 
 export const ICON = {
   speaker:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 9h4l5-4v14l-5-4h-4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.8 5.8a8.8 8.8 0 0 1 0 12.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
@@ -32,18 +30,16 @@ export const ICON = {
 const TINT = { animals:"--t-animals", fruits:"--t-fruits", colors:"--t-colors", numbers:"--t-numbers", home:"--t-home", nature:"--t-nature" };
 export const tintOf = topic => `var(${TINT[topic && topic.id] || "--t-custom"})`;
 
+/* Что показываем вместо слова: фотография автора, затем цвет или число, затем эмодзи. */
 export function picHTML(w){
   if (w && w.img) return `<img class="wpic" src="${esc(w.img)}" alt="" loading="lazy" decoding="async">`;
   const p = String(w[1] || "");
   if (/^#[0-9a-f]{6}$/i.test(p)) return `<span class="swatch" style="--sw:${p}"></span>`;
   if (/^\d{1,2}$/.test(p)) return `<span class="numpic"><span class="numeral">${p}</span><span class="asyks" style="--asz:${p<=2?46:p<=4?32:p<=6?24:18}%">${ICON.asyk.repeat(+p)}</span></span>`;
-  if (ILL[w[0]]) return illSVG(w[0]);
   return `<span class="emoji" aria-hidden="true">${esc(p)}</span>`;
 }
 export function topicPic(topic){
   if (topic && topic.img) return `<img class="wpic" src="${esc(topic.img)}" alt="" loading="lazy" decoding="async">`;
-  const key = ILL_TOPIC[topic.id];
-  if (key && ILL[key]) return illSVG(key);
   if (topic.pic === "@colors") return `<span class="trio"><i style="background:#E0332B"></i><i style="background:#F5C518"></i><i style="background:#2F6FD6"></i></span>`;
   if (topic.pic === "@numbers") return `<span class="nums">1 2 3</span>`;
   return esc(topic.pic);
@@ -91,4 +87,5 @@ export const sampleP = (typeof window !== "undefined" && window.claude && typeof
 
 /* Аватары ребёнка — из того же набора рисунков */
 export const AVATARS = ["мысық", "ит", "аю", "қоян", "түйе", "қой"];
-export const avatarHTML = key => (ILL[key] ? illSVG(key) : `<span class="emoji" aria-hidden="true">🙂</span>`);
+const AVATAR_EMOJI = { "мысық": "🐱", "ит": "🐶", "аю": "🐻", "қоян": "🐰", "түйе": "🐫", "қой": "🐑" };
+export const avatarHTML = key => `<span class="emoji" aria-hidden="true">${AVATAR_EMOJI[key] || "🙂"}</span>`;

@@ -61,7 +61,7 @@ function renderStart(){
     </div>
     <p class="status" id="st"></p>
     <div class="gate-foot">
-      <button class="btn ghost" id="toJoin" type="button">${t("ob_have_code")}</button>
+      <button class="btn" id="toJoin" type="button">${t("ob_have_code")}</button>
       <p class="note">${t("ob_have_code_note")}</p>
     </div>`);
 

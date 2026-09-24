@@ -27,7 +27,6 @@ const PRECACHE = [
   "./src/voices.js",
   "./src/recorder.js",
   "./src/speech.js",
-  "./src/ill.js",
   "./src/words.js",
   "./src/views/onboarding.js",
   "./src/views/children.js",
